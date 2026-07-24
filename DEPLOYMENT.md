@@ -71,7 +71,6 @@ Free, no credit card: [aistudio.google.com/apikey](https://aistudio.google.com/a
 | `AWS_SECRET_ACCESS_KEY` | yes | IAM user secret key |
 | `AWS_S3_BUCKET` | yes | bucket name |
 | `GEMINI_API_KEY` | no | enables AI enrichment |
-| `VITE_APP_TITLE` | no | defaults to "AWS Bill to BOM" |
 
 4. Deploy. Vercel runs `vite build` for the client (output: `dist/public`) and
    automatically builds `api/index.ts` as a serverless function — the API and
