@@ -1,8 +1,9 @@
 {
-  "buildCommand": "pnpm build",
+  "buildCommand": "vite build",
   "devCommand": "pnpm dev",
   "installCommand": "pnpm install",
-  "framework": "vite",
+  "framework": null,
+  "outputDirectory": "dist/public",
   "env": {
     "DATABASE_URL": {
       "description": "MySQL/TiDB connection string",
@@ -30,16 +31,15 @@
     }
   },
   "functions": {
-    "server/_core/index.ts": {
-      "runtime": "nodejs22.x",
+    "api/index.ts": {
       "memory": 512,
-      "maxDuration": 180
+      "maxDuration": 60
     }
   },
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/$1"
+      "destination": "/api/index"
     },
     {
       "source": "/(.*)",

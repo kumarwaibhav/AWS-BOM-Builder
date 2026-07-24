@@ -73,7 +73,11 @@ Free, no credit card: [aistudio.google.com/apikey](https://aistudio.google.com/a
 | `GEMINI_API_KEY` | no | enables AI enrichment |
 | `VITE_APP_TITLE` | no | defaults to "AWS Bill to BOM" |
 
-4. Deploy. Vercel runs `pnpm run build` (vite build + esbuild server bundle).
+4. Deploy. Vercel runs `vite build` for the client (output: `dist/public`) and
+   automatically builds `api/index.ts` as a serverless function — the API and
+   the client are genuinely separate deployables here, not one long-running
+   process. `server/_core/index.ts` (the traditional `app.listen()` server)
+   is only used for local dev and Docker; Vercel never touches it.
 5. Verify: `curl https://your-domain.vercel.app/api/trpc/system.health` should return `{"result":{"data":{"ok":true,"database":"connected"}}}`.
 
 ## 5. Docker (alternative to Vercel)

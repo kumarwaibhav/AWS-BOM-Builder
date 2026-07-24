@@ -1,12 +1,13 @@
+/**
+ * Traditional long-running server entrypoint — used for local dev (`pnpm dev`)
+ * and any non-serverless host (Docker, a VPS, Railway, etc.). Serves both the
+ * API and the client from one process. NOT used on Vercel — see /api/index.ts
+ * for that target, which reuses the same createApiApp() middleware stack.
+ */
 import "dotenv/config";
-import express from "express";
 import { createServer } from "http";
 import net from "net";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { appRouter } from "../routers";
-import { createContext } from "./context";
+import { createApiApp } from "./app";
 import { serveStatic, setupVite } from "./vite";
 import { logger } from "./logger";
 
@@ -37,41 +38,9 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
-  const app = express();
+  const app = createApiApp();
   const server = createServer(app);
 
-  // Security headers. CSP is disabled here because Vite's dev middleware
-  // injects inline scripts for HMR; a strict CSP belongs at the CDN/edge
-  // layer in production instead of fighting the dev server.
-  app.use(helmet({ contentSecurityPolicy: false }));
-
-  // Configure body parser with larger size limit for file uploads (base64
-  // inflates a 25MB PDF to ~34MB).
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
-
-  // Rate limit the API surface: uploads are the expensive path (PDF parse +
-  // LLM enrichment + S3 + Excel generation), so keep this conservative.
-  const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many requests, please try again later." },
-  });
-  app.use("/api/trpc", apiLimiter);
-
-  // tRPC API
-  app.use(
-    "/api/trpc",
-    createExpressMiddleware({
-      router: appRouter,
-      createContext,
-      onError({ error, path }) {
-        logger.error("tRPC error", { path, code: error.code, message: error.message });
-      },
-    })
-  );
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
@@ -83,7 +52,7 @@ async function startServer() {
   const port = await findAvailablePort(preferredPort);
 
   if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+    logger.info(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
   server.listen(port, () => {
