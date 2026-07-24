@@ -4,18 +4,19 @@ import postgres from "postgres";
 import {
   bills, bomItems, InsertBill, InsertBomItem,
 } from "../drizzle/schema";
+import { ENV } from "./_core/env";
 import { logger } from "./_core/logger";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  if (!_db && ENV.databaseUrl) {
     try {
       // `prepare: false` is required against Supabase's Supavisor pooler in
       // transaction mode (the default pooled connection string) — it doesn't
       // support prepared statements. Harmless against a direct connection too.
-      const client = postgres(process.env.DATABASE_URL, { prepare: false });
+      const client = postgres(ENV.databaseUrl, { prepare: false });
       _db = drizzle(client);
     } catch (error) {
       logger.warn("Database connection failed", { message: error instanceof Error ? error.message : String(error) });

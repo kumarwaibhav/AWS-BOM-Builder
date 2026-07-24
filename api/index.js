@@ -81,6 +81,27 @@ var bomItems = pgTable("bom_items", {
   createdAt: timestamp("createdAt").defaultNow().notNull()
 });
 
+// server/_core/env.ts
+var ENV = {
+  // DATABASE_URL is the app-native name (used by .env.example, Docker, local
+  // dev). POSTGRES_URL is what Supabase's native Vercel integration syncs
+  // automatically on every deploy (including password rotations) — preferred
+  // when present so Vercel deployments never need a manually-copied secret.
+  databaseUrl: process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? "",
+  isProduction: process.env.NODE_ENV === "production",
+  supabase: {
+    url: process.env.SUPABASE_URL ?? "",
+    // Server-only secret — bypasses Row Level Security entirely, so it must
+    // never be sent to the client or logged. Only imported by server/ code.
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+    bucket: process.env.SUPABASE_STORAGE_BUCKET ?? ""
+  },
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY ?? "",
+    model: process.env.GEMINI_MODEL ?? "gemini-2.0-flash"
+  }
+};
+
 // server/_core/logger.ts
 function emit(level, message, context) {
   const entry = {
@@ -103,9 +124,9 @@ var logger = {
 // server/db.ts
 var _db = null;
 async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  if (!_db && ENV.databaseUrl) {
     try {
-      const client2 = postgres(process.env.DATABASE_URL, { prepare: false });
+      const client2 = postgres(ENV.databaseUrl, { prepare: false });
       _db = drizzle(client2);
     } catch (error) {
       logger.warn("Database connection failed", { message: error instanceof Error ? error.message : String(error) });
@@ -574,23 +595,6 @@ function parseAwsBill(text2) {
   }
   return { billingPeriod, accountId, grandTotalUsd, items };
 }
-
-// server/_core/env.ts
-var ENV = {
-  databaseUrl: process.env.DATABASE_URL ?? "",
-  isProduction: process.env.NODE_ENV === "production",
-  supabase: {
-    url: process.env.SUPABASE_URL ?? "",
-    // Server-only secret — bypasses Row Level Security entirely, so it must
-    // never be sent to the client or logged. Only imported by server/ code.
-    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
-    bucket: process.env.SUPABASE_STORAGE_BUCKET ?? ""
-  },
-  gemini: {
-    apiKey: process.env.GEMINI_API_KEY ?? "",
-    model: process.env.GEMINI_MODEL ?? "gemini-2.0-flash"
-  }
-};
 
 // server/_core/llm.ts
 function toGeminiSchema(schema) {
