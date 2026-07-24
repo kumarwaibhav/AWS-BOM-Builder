@@ -1,0 +1,60 @@
+{
+  "buildCommand": "pnpm build",
+  "devCommand": "pnpm dev",
+  "installCommand": "pnpm install",
+  "framework": "vite",
+  "env": {
+    "DATABASE_URL": {
+      "description": "MySQL/TiDB connection string",
+      "required": true
+    },
+    "AWS_REGION": {
+      "description": "AWS region for the S3 bucket, e.g. us-east-1",
+      "required": true
+    },
+    "AWS_ACCESS_KEY_ID": {
+      "description": "IAM access key scoped to the S3 bucket",
+      "required": true
+    },
+    "AWS_SECRET_ACCESS_KEY": {
+      "description": "IAM secret key scoped to the S3 bucket",
+      "required": true
+    },
+    "AWS_S3_BUCKET": {
+      "description": "S3 bucket name for storing uploaded PDFs and generated Excel BOMs",
+      "required": true
+    },
+    "GEMINI_API_KEY": {
+      "description": "Optional: enables AI enrichment of ambiguous line items (free tier at aistudio.google.com/apikey)",
+      "required": false
+    }
+  },
+  "functions": {
+    "server/_core/index.ts": {
+      "runtime": "nodejs22.x",
+      "memory": 512,
+      "maxDuration": 180
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
+    }
+  ]
+}
