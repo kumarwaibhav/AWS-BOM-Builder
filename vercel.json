@@ -1,11 +1,11 @@
 {
-  "buildCommand": "vite build",
+  "buildCommand": "vite build && pnpm run build:vercel-api",
   "devCommand": "pnpm dev",
   "installCommand": "pnpm install",
   "framework": null,
   "outputDirectory": "dist/public",
   "functions": {
-    "api/index.ts": {
+    "api/index.js": {
       "memory": 512,
       "maxDuration": 60
     }
