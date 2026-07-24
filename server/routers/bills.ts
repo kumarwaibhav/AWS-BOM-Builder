@@ -13,7 +13,6 @@ import { parseAwsBill } from "../billParser";
 import { enrichItems } from "../enrichment";
 import { generateBomExcel } from "../excel";
 import { storageGet, storagePut } from "../storage";
-import { consolidateSavingsPlans } from "../consolidation";
 
 const MAX_PDF_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -63,15 +62,23 @@ export const billsRouter = router({
         const enrichedFlags = parsed.items.map(i => i.needsEnrichment || !i.serviceCategory);
         const enriched = await enrichItems(parsed.items);
 
-        // 5. Consolidate Compute Savings Plan line pairs
-        const consolidated = consolidateSavingsPlans(enriched);
+        // 5. Calculate grand total from line items (for reconciliation against
+        //    the bill's own printed total). NOTE: an earlier "consolidation"
+        //    step used to merge each on-demand line with its matching
+        //    "covered by Compute Savings Plans" credit line here. It was
+        //    removed — its instance-type matching collapsed different
+        //    instance sizes in the same family (t3.small/t3.medium/t3.large
+        //    all resolved to "t3", etc.), causing wrong lines to be merged
+        //    and legitimate credits to be silently dropped, overstating a
+        //    real bill's total by $56.74 (verified). The raw parsed+enriched
+        //    items already reconcile with AWS's own total to the penny, and
+        //    keeping the on-demand line and its savings-plan credit as two
+        //    separate, clearly-labeled rows is more auditable anyway.
+        const calculatedTotal = enriched.reduce((sum, item) => sum + item.costUsd, 0);
 
-        // 6. Calculate grand total from line items (for reconciliation)
-        const calculatedTotal = consolidated.reduce((sum, item) => sum + item.costUsd, 0);
-
-        // 7. persist BOM items
+        // 6. persist BOM items
         await db.insertBomItems(
-          consolidated.map((item, idx) => ({
+          enriched.map((item, idx) => ({
             billId,
             serialNo: idx + 1,
             region: item.region,
@@ -81,13 +88,13 @@ export const billsRouter = router({
             quantity: item.quantity === null ? null : String(item.quantity),
             uom: item.uom,
             costUsd: item.costUsd.toFixed(2),
-            llmEnriched: enrichedFlags[consolidated.indexOf(item)] ? 1 : 0,
+            llmEnriched: enrichedFlags[idx] ? 1 : 0,
           }))
         );
 
-        // 8. generate the Excel BOM and store it in Supabase Storage
+        // 7. generate the Excel BOM and store it in Supabase Storage
         const excelBuffer = await generateBomExcel(
-          consolidated.map((item, idx) => ({
+          enriched.map((item, idx) => ({
             sno: idx + 1,
             region: item.region,
             serviceCategory: item.serviceCategory,
@@ -112,7 +119,7 @@ export const billsRouter = router({
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         );
 
-        // 9. finalize bill record
+        // 8. finalize bill record
         await db.updateBill(billId, {
           status: "completed",
           excelKey,
@@ -120,10 +127,10 @@ export const billsRouter = router({
           accountId: parsed.accountId,
           grandTotalUsd: parsed.grandTotalUsd === null ? null : parsed.grandTotalUsd.toFixed(2),
           calculatedTotalUsd: calculatedTotal.toFixed(2),
-          itemCount: consolidated.length,
+          itemCount: enriched.length,
         });
 
-        return { billId, itemCount: consolidated.length };
+        return { billId, itemCount: enriched.length };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to parse PDF";
         await db.updateBill(billId, { status: "failed", errorMessage: message });

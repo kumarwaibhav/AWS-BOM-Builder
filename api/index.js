@@ -893,77 +893,6 @@ async function storageGet(relKey) {
   return { key, url: data.signedUrl };
 }
 
-// server/consolidation.ts
-function isSavingsPlanCredit(item) {
-  const desc2 = item.description.toLowerCase();
-  const isSavingsPlan = desc2.includes("savings plan") || desc2.includes("savings plans");
-  const isNegative = item.costUsd < 0;
-  return isSavingsPlan && isNegative;
-}
-function isOnDemandCompute(item) {
-  const category = item.serviceCategory.toLowerCase();
-  const desc2 = item.description.toLowerCase();
-  const isComputeService = category.includes("compute") || category.includes("database") || desc2.includes("on-demand") || desc2.includes("on demand");
-  return isComputeService && item.costUsd > 0;
-}
-function extractInstanceType(description) {
-  const match = description.match(/\b(db\.)?(t\d|m\d|r\d|c\d|i\d|x\d|z\d|h\d|f\d|g\d|p\d|d\d)[\w\d]*\b/i);
-  return match ? match[0] : null;
-}
-function createMatchKey(item) {
-  const instanceType = extractInstanceType(item.description) || "";
-  return `${item.region}|${item.serviceName}|${instanceType}`.toLowerCase();
-}
-function consolidateSavingsPlans(items) {
-  const consolidated = [];
-  const processedIndices = /* @__PURE__ */ new Set();
-  for (let i = 0; i < items.length; i++) {
-    if (processedIndices.has(i)) continue;
-    const item = items[i];
-    if (isSavingsPlanCredit(item)) {
-      const matchKey = createMatchKey(item);
-      let matchedIndex = -1;
-      for (let j = 0; j < items.length; j++) {
-        if (i === j || processedIndices.has(j)) continue;
-        if (isOnDemandCompute(items[j])) {
-          if (createMatchKey(items[j]) === matchKey) {
-            matchedIndex = j;
-            break;
-          }
-        }
-      }
-      if (matchedIndex !== -1) {
-        const onDemand = items[matchedIndex];
-        const credit = item;
-        const consolidatedQty = (onDemand.quantity ?? 0) + (credit.quantity ?? 0);
-        const consolidatedCost = onDemand.costUsd + credit.costUsd;
-        const blendedRate = consolidatedQty > 0 ? consolidatedCost / consolidatedQty : consolidatedCost;
-        const consolidated_item = {
-          region: onDemand.region,
-          serviceCategory: onDemand.serviceCategory,
-          serviceName: onDemand.serviceName,
-          description: `${onDemand.description} (Blended with Savings Plan)`,
-          quantity: consolidatedQty > 0 ? consolidatedQty : onDemand.quantity,
-          uom: onDemand.uom,
-          costUsd: consolidatedCost,
-          needsEnrichment: onDemand.needsEnrichment || credit.needsEnrichment,
-          isConsolidated: true,
-          originalCostUsd: onDemand.costUsd
-        };
-        consolidated.push(consolidated_item);
-        processedIndices.add(i);
-        processedIndices.add(matchedIndex);
-        continue;
-      }
-    }
-    if (!isSavingsPlanCredit(item)) {
-      consolidated.push(item);
-      processedIndices.add(i);
-    }
-  }
-  return consolidated;
-}
-
 // server/routers/bills.ts
 var MAX_PDF_BYTES = 25 * 1024 * 1024;
 var billsRouter = router({
@@ -1001,10 +930,9 @@ var billsRouter = router({
       }
       const enrichedFlags = parsed.items.map((i) => i.needsEnrichment || !i.serviceCategory);
       const enriched = await enrichItems(parsed.items);
-      const consolidated = consolidateSavingsPlans(enriched);
-      const calculatedTotal = consolidated.reduce((sum, item) => sum + item.costUsd, 0);
+      const calculatedTotal = enriched.reduce((sum, item) => sum + item.costUsd, 0);
       await insertBomItems(
-        consolidated.map((item, idx) => ({
+        enriched.map((item, idx) => ({
           billId,
           serialNo: idx + 1,
           region: item.region,
@@ -1014,11 +942,11 @@ var billsRouter = router({
           quantity: item.quantity === null ? null : String(item.quantity),
           uom: item.uom,
           costUsd: item.costUsd.toFixed(2),
-          llmEnriched: enrichedFlags[consolidated.indexOf(item)] ? 1 : 0
+          llmEnriched: enrichedFlags[idx] ? 1 : 0
         }))
       );
       const excelBuffer = await generateBomExcel(
-        consolidated.map((item, idx) => ({
+        enriched.map((item, idx) => ({
           sno: idx + 1,
           region: item.region,
           serviceCategory: item.serviceCategory,
@@ -1049,9 +977,9 @@ var billsRouter = router({
         accountId: parsed.accountId,
         grandTotalUsd: parsed.grandTotalUsd === null ? null : parsed.grandTotalUsd.toFixed(2),
         calculatedTotalUsd: calculatedTotal.toFixed(2),
-        itemCount: consolidated.length
+        itemCount: enriched.length
       });
-      return { billId, itemCount: consolidated.length };
+      return { billId, itemCount: enriched.length };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to parse PDF";
       await updateBill(billId, { status: "failed", errorMessage: message });
