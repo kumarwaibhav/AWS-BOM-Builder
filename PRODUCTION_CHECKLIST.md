@@ -9,21 +9,22 @@ Reflects what's actually implemented as of this rebuild — check items are only
 - [x] No authentication — fully anonymous, session-scoped
 - [x] No hardcoded credentials in source (see Security section below)
 
-## Database
-- [ ] Production database created and reachable from your deploy platform
-- [ ] `pnpm drizzle-kit migrate` applied against production `DATABASE_URL`
+## Database (Supabase Postgres)
+- [ ] Supabase project created (free tier, no credit card)
+- [ ] `pnpm drizzle-kit migrate` applied against `DIRECT_URL` (not the pooled `DATABASE_URL` — transaction-mode pooling doesn't support DDL)
 - [ ] Indexes on `bills.sessionId`, `bills.createdAt`, `bom_items.billId` (add via a migration if query volume grows — not auto-created by the base schema)
-- [ ] Backup strategy in place (e.g. scheduled `mysqldump`, or your managed DB provider's snapshot feature)
+- [ ] Aware of the free-tier auto-pause after 7 days of inactivity — set up a scheduled ping if the deployment needs to stay always-warm
+- [ ] Backup strategy in place (Supabase's own point-in-time recovery on paid tiers, or a scheduled `pg_dump` on free tier)
 
-## Cloudflare R2
-- [ ] Bucket created, private (no public bucket policy needed — the app uses presigned URLs)
-- [ ] API token scoped to Object Read & Write on that bucket only
-- [ ] `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` set in your deploy environment
+## Storage (Supabase Storage)
+- [ ] Bucket created, private (no public bucket policy needed — the app uses signed URLs)
+- [ ] `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET` set in your deploy environment
+- [ ] Confirmed `SUPABASE_SERVICE_ROLE_KEY` is only referenced by server-side code, never bundled into the client
 
 ## Features (verified working end-to-end in this rebuild)
 - [x] PDF upload + parsing
 - [x] Excel BOM export with the exact 8-column schema
-- [x] PDF re-download from S3
+- [x] PDF re-download from Supabase Storage
 - [x] Compute Savings Plan consolidation
 - [x] Grand total reconciliation — **now actually compares** calculated vs. stated total and shows a warning on mismatch (previously always showed green regardless)
 - [x] Bill history persists per browser session

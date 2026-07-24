@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import {
   bills, bomItems, InsertBill, InsertBomItem,
 } from "../drizzle/schema";
@@ -11,7 +12,11 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      // `prepare: false` is required against Supabase's Supavisor pooler in
+      // transaction mode (the default pooled connection string) — it doesn't
+      // support prepared statements. Harmless against a direct connection too.
+      const client = postgres(process.env.DATABASE_URL, { prepare: false });
+      _db = drizzle(client);
     } catch (error) {
       logger.warn("Database connection failed", { message: error instanceof Error ? error.message : String(error) });
       _db = null;
@@ -27,8 +32,9 @@ export async function getDb() {
 export async function createBill(bill: InsertBill): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(bills).values(bill);
-  return result[0].insertId;
+  // Postgres has no insertId equivalent to mysql2's result — use RETURNING.
+  const [inserted] = await db.insert(bills).values(bill).returning({ id: bills.id });
+  return inserted.id;
 }
 
 export async function updateBill(id: number, patch: Partial<InsertBill>): Promise<void> {

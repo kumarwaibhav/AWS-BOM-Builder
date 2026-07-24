@@ -12,49 +12,56 @@ import { z } from "zod";
 
 // server/db.ts
 import { desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 
 // drizzle/schema.ts
 import {
-  decimal,
-  int,
-  mysqlEnum,
-  mysqlTable,
+  integer,
+  numeric,
+  pgEnum,
+  pgTable,
+  serial,
   text,
   timestamp,
   varchar
-} from "drizzle-orm/mysql-core";
-var bills = mysqlTable("bills", {
-  id: int("id").autoincrement().primaryKey(),
+} from "drizzle-orm/pg-core";
+var billStatusEnum = pgEnum("bill_status", [
+  "processing",
+  "completed",
+  "failed"
+]);
+var bills = pgTable("bills", {
+  id: serial("id").primaryKey(),
   /** Session ID for anonymous tracking (no authentication required) */
   sessionId: varchar("sessionId", { length: 128 }).notNull(),
   /** Original uploaded file name */
   fileName: varchar("fileName", { length: 512 }).notNull(),
-  /** S3 key of the uploaded PDF */
+  /** Supabase Storage object key of the uploaded PDF */
   pdfKey: varchar("pdfKey", { length: 1024 }).notNull(),
-  /** S3 key of the generated Excel BOM (set after generation) */
+  /** Supabase Storage object key of the generated Excel BOM (set after generation) */
   excelKey: varchar("excelKey", { length: 1024 }),
   /** Billing period string extracted from the bill, e.g. "Jun 1 - Jun 30, 2026" */
   billingPeriod: varchar("billingPeriod", { length: 128 }),
   /** AWS Account ID extracted from the bill */
   accountId: varchar("accountId", { length: 64 }),
   /** Grand total in USD extracted from the bill summary */
-  grandTotalUsd: decimal("grandTotalUsd", { precision: 14, scale: 2 }),
+  grandTotalUsd: numeric("grandTotalUsd", { precision: 14, scale: 2 }),
   /** Calculated total from sum of line items (for reconciliation) */
-  calculatedTotalUsd: decimal("calculatedTotalUsd", { precision: 14, scale: 2 }),
+  calculatedTotalUsd: numeric("calculatedTotalUsd", { precision: 14, scale: 2 }),
   /** Number of BOM line items extracted */
-  itemCount: int("itemCount").default(0).notNull(),
+  itemCount: integer("itemCount").default(0).notNull(),
   /** Processing lifecycle status */
-  status: mysqlEnum("status", ["processing", "completed", "failed"]).default("processing").notNull(),
+  status: billStatusEnum("status").default("processing").notNull(),
   /** Error message when status = failed */
   errorMessage: text("errorMessage"),
   createdAt: timestamp("createdAt").defaultNow().notNull()
 });
-var bomItems = mysqlTable("bom_items", {
-  id: int("id").autoincrement().primaryKey(),
-  billId: int("billId").notNull(),
+var bomItems = pgTable("bom_items", {
+  id: serial("id").primaryKey(),
+  billId: integer("billId").notNull(),
   /** S.No. — 1-based order within the bill */
-  serialNo: int("serialNo").notNull(),
+  serialNo: integer("serialNo").notNull(),
   /** AWS Region, e.g. "Asia Pacific (Mumbai)" or "Global" */
   region: varchar("region", { length: 128 }).notNull(),
   /** AWS Service Category, e.g. "Compute", "Database", "Networking" */
@@ -64,13 +71,13 @@ var bomItems = mysqlTable("bom_items", {
   /** AWS Service Description / Config — the detailed rate/usage line */
   description: text("description").notNull(),
   /** AWS Qty — usage quantity (stored as string to preserve precision/format) */
-  quantity: decimal("quantity", { precision: 20, scale: 6 }),
+  quantity: numeric("quantity", { precision: 20, scale: 6 }),
   /** AWS UOM — unit of measure, e.g. "Hrs", "GB-Mo", "Requests" */
   uom: varchar("uom", { length: 64 }),
   /** AWS Billed Cost USD (negative for savings-plan credits) */
-  costUsd: decimal("costUsd", { precision: 14, scale: 2 }).notNull(),
+  costUsd: numeric("costUsd", { precision: 14, scale: 2 }).notNull(),
   /** Whether the LLM enriched/classified this row */
-  llmEnriched: int("llmEnriched").default(0).notNull(),
+  llmEnriched: integer("llmEnriched").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull()
 });
 
@@ -98,7 +105,8 @@ var _db = null;
 async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      const client2 = postgres(process.env.DATABASE_URL, { prepare: false });
+      _db = drizzle(client2);
     } catch (error) {
       logger.warn("Database connection failed", { message: error instanceof Error ? error.message : String(error) });
       _db = null;
@@ -109,8 +117,8 @@ async function getDb() {
 async function createBill(bill) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(bills).values(bill);
-  return result[0].insertId;
+  const [inserted] = await db.insert(bills).values(bill).returning({ id: bills.id });
+  return inserted.id;
 }
 async function updateBill(id, patch) {
   const db = await getDb();
@@ -571,11 +579,12 @@ function parseAwsBill(text2) {
 var ENV = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   isProduction: process.env.NODE_ENV === "production",
-  r2: {
-    accountId: process.env.R2_ACCOUNT_ID ?? "",
-    accessKeyId: process.env.R2_ACCESS_KEY_ID ?? "",
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? "",
-    bucket: process.env.R2_BUCKET ?? ""
+  supabase: {
+    url: process.env.SUPABASE_URL ?? "",
+    // Server-only secret — bypasses Row Level Security entirely, so it must
+    // never be sent to the client or logged. Only imported by server/ code.
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+    bucket: process.env.SUPABASE_STORAGE_BUCKET ?? ""
   },
   gemini: {
     apiKey: process.env.GEMINI_API_KEY ?? "",
@@ -827,60 +836,57 @@ async function generateBomExcel(rows, meta) {
 }
 
 // server/storage.ts
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-var PRESIGNED_URL_TTL_SECONDS = 60 * 60;
+import { createClient } from "@supabase/supabase-js";
+var SIGNED_URL_TTL_SECONDS = 60 * 60;
 var client = null;
 function getClient() {
   if (client) return client;
-  if (!ENV.r2.accountId || !ENV.r2.accessKeyId || !ENV.r2.secretAccessKey) {
+  if (!ENV.supabase.url || !ENV.supabase.serviceRoleKey) {
     throw new Error(
-      "Storage not configured: set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY"
+      "Storage not configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"
     );
   }
-  client = new S3Client({
-    // R2 has no regions — "auto" lets Cloudflare route to the nearest location.
-    region: "auto",
-    endpoint: `https://${ENV.r2.accountId}.r2.cloudflarestorage.com`,
-    // R2 only supports path-style addressing (bucket-in-path), not the
-    // virtual-hosted-style (bucket-in-subdomain) AWS S3 defaults to.
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: ENV.r2.accessKeyId,
-      secretAccessKey: ENV.r2.secretAccessKey
+  client = createClient(ENV.supabase.url, ENV.supabase.serviceRoleKey, {
+    auth: {
+      // Backend-only usage in a stateless serverless function — there is no
+      // session to persist and no storage (localStorage/cookies) to persist
+      // it to.
+      persistSession: false,
+      autoRefreshToken: false
     }
   });
   return client;
 }
 function getBucket() {
-  if (!ENV.r2.bucket) {
-    throw new Error("Storage not configured: set R2_BUCKET");
+  if (!ENV.supabase.bucket) {
+    throw new Error("Storage not configured: set SUPABASE_STORAGE_BUCKET");
   }
-  return ENV.r2.bucket;
+  return ENV.supabase.bucket;
 }
 function normalizeKey(relKey) {
   return relKey.replace(/^\/+/, "");
 }
 async function storagePut(relKey, data, contentType = "application/octet-stream") {
   const key = normalizeKey(relKey);
-  await getClient().send(
-    new PutObjectCommand({
-      Bucket: getBucket(),
-      Key: key,
-      Body: data,
-      ContentType: contentType
-    })
-  );
+  const { error } = await getClient().storage.from(getBucket()).upload(key, data, {
+    contentType,
+    // Matches the prior S3/R2 PutObject semantics: always succeeds, even
+    // if an object at this key already exists. Collisions are practically
+    // impossible anyway since keys embed a random nanoid segment.
+    upsert: true
+  });
+  if (error) {
+    throw new Error(`Storage upload failed: ${error.message}`);
+  }
   return { key };
 }
 async function storageGet(relKey) {
   const key = normalizeKey(relKey);
-  const url = await getSignedUrl(
-    getClient(),
-    new GetObjectCommand({ Bucket: getBucket(), Key: key }),
-    { expiresIn: PRESIGNED_URL_TTL_SECONDS }
-  );
-  return { key, url };
+  const { data, error } = await getClient().storage.from(getBucket()).createSignedUrl(key, SIGNED_URL_TTL_SECONDS);
+  if (error || !data) {
+    throw new Error(`Storage signed URL failed: ${error?.message ?? "unknown error"}`);
+  }
+  return { key, url: data.signedUrl };
 }
 
 // server/consolidation.ts
@@ -1061,7 +1067,7 @@ var billsRouter = router({
     const items = await getBomItemsByBill(bill.id);
     return { bill, items };
   }),
-  /** Presigned R2 URL for the generated Excel BOM (re-download anytime). */
+  /** Signed Supabase Storage URL for the generated Excel BOM (re-download anytime). */
   downloadExcel: publicProcedure.input(z2.object({ billId: z2.number().int().positive(), sessionId: z2.string().min(1).max(128) })).mutation(async ({ input }) => {
     const bill = await getBillById(input.billId);
     if (!bill || bill.sessionId !== input.sessionId) {
@@ -1073,7 +1079,7 @@ var billsRouter = router({
     const { url } = await storageGet(bill.excelKey);
     return { url, fileName: bill.fileName.replace(/\.pdf$/i, "") + "-BOM.xlsx" };
   }),
-  /** Presigned R2 URL for the original uploaded PDF. */
+  /** Signed Supabase Storage URL for the original uploaded PDF. */
   downloadPdf: publicProcedure.input(z2.object({ billId: z2.number().int().positive(), sessionId: z2.string().min(1).max(128) })).mutation(async ({ input }) => {
     const bill = await getBillById(input.billId);
     if (!bill || bill.sessionId !== input.sessionId) {

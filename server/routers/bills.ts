@@ -1,6 +1,6 @@
 /**
  * Bills feature router: upload & parse AWS billing PDFs, list history,
- * fetch BOM items, and produce downloadable Excel files — all Cloudflare R2-backed.
+ * fetch BOM items, and produce downloadable Excel files — all Supabase Storage-backed.
  * No authentication required — anonymous access via sessionId.
  */
 import { TRPCError } from "@trpc/server";
@@ -36,7 +36,7 @@ export const billsRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "File is not a valid PDF" });
       }
 
-      // 1. store the original PDF in R2
+      // 1. store the original PDF in Supabase Storage
       const safeName = input.fileName.replace(/[^\w.\-]+/g, "_");
       const pdfKey = `bills/${input.sessionId}/${nanoid(10)}-${safeName}`;
       await storagePut(pdfKey, buffer, "application/pdf");
@@ -85,7 +85,7 @@ export const billsRouter = router({
           }))
         );
 
-        // 8. generate the Excel BOM and store it in R2
+        // 8. generate the Excel BOM and store it in Supabase Storage
         const excelBuffer = await generateBomExcel(
           consolidated.map((item, idx) => ({
             sno: idx + 1,
@@ -150,7 +150,7 @@ export const billsRouter = router({
       return { bill, items };
     }),
 
-  /** Presigned R2 URL for the generated Excel BOM (re-download anytime). */
+  /** Signed Supabase Storage URL for the generated Excel BOM (re-download anytime). */
   downloadExcel: publicProcedure
     .input(z.object({ billId: z.number().int().positive(), sessionId: z.string().min(1).max(128) }))
     .mutation(async ({ input }) => {
@@ -165,7 +165,7 @@ export const billsRouter = router({
       return { url, fileName: bill.fileName.replace(/\.pdf$/i, "") + "-BOM.xlsx" };
     }),
 
-  /** Presigned R2 URL for the original uploaded PDF. */
+  /** Signed Supabase Storage URL for the original uploaded PDF. */
   downloadPdf: publicProcedure
     .input(z.object({ billId: z.number().int().positive(), sessionId: z.string().min(1).max(128) }))
     .mutation(async ({ input }) => {

@@ -1,46 +1,45 @@
 /**
- * Cloudflare R2-backed storage — direct, no third-party proxy.
- * R2 speaks the S3 API, so this uses the same @aws-sdk/client-s3 client as
- * AWS S3 would, just pointed at R2's S3-compatible endpoint with R2
- * credentials. Uploads via PutObjectCommand; downloads via short-lived
- * presigned GET URLs. R2's free tier (10GB storage, no egress fees, no
- * time limit) makes this genuinely free at this app's scale, unlike AWS S3.
+ * Supabase Storage-backed storage — direct, no third-party proxy.
+ * Uses the service-role key (a server-only secret that bypasses Row Level
+ * Security) since this app has no per-user auth — access control happens at
+ * the application layer (sessionId ownership checks in bills.ts), not via
+ * Supabase RLS policies. This key must never reach the client bundle; it is
+ * only imported here, in server/ code.
+ *
+ * Uploads via Storage .upload(); downloads via short-lived signed URLs
+ * (createSignedUrl), functionally equivalent to S3/R2 presigned GET URLs.
  */
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { ENV } from "./_core/env";
 
-const PRESIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
+const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
 
-let client: S3Client | null = null;
+let client: SupabaseClient | null = null;
 
-function getClient(): S3Client {
+function getClient(): SupabaseClient {
   if (client) return client;
-  if (!ENV.r2.accountId || !ENV.r2.accessKeyId || !ENV.r2.secretAccessKey) {
+  if (!ENV.supabase.url || !ENV.supabase.serviceRoleKey) {
     throw new Error(
-      "Storage not configured: set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY"
+      "Storage not configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"
     );
   }
-  client = new S3Client({
-    // R2 has no regions — "auto" lets Cloudflare route to the nearest location.
-    region: "auto",
-    endpoint: `https://${ENV.r2.accountId}.r2.cloudflarestorage.com`,
-    // R2 only supports path-style addressing (bucket-in-path), not the
-    // virtual-hosted-style (bucket-in-subdomain) AWS S3 defaults to.
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: ENV.r2.accessKeyId,
-      secretAccessKey: ENV.r2.secretAccessKey,
+  client = createClient(ENV.supabase.url, ENV.supabase.serviceRoleKey, {
+    auth: {
+      // Backend-only usage in a stateless serverless function — there is no
+      // session to persist and no storage (localStorage/cookies) to persist
+      // it to.
+      persistSession: false,
+      autoRefreshToken: false,
     },
   });
   return client;
 }
 
 function getBucket(): string {
-  if (!ENV.r2.bucket) {
-    throw new Error("Storage not configured: set R2_BUCKET");
+  if (!ENV.supabase.bucket) {
+    throw new Error("Storage not configured: set SUPABASE_STORAGE_BUCKET");
   }
-  return ENV.r2.bucket;
+  return ENV.supabase.bucket;
 }
 
 function normalizeKey(relKey: string): string {
@@ -53,23 +52,28 @@ export async function storagePut(
   contentType = "application/octet-stream"
 ): Promise<{ key: string }> {
   const key = normalizeKey(relKey);
-  await getClient().send(
-    new PutObjectCommand({
-      Bucket: getBucket(),
-      Key: key,
-      Body: data,
-      ContentType: contentType,
-    })
-  );
+  const { error } = await getClient()
+    .storage.from(getBucket())
+    .upload(key, data, {
+      contentType,
+      // Matches the prior S3/R2 PutObject semantics: always succeeds, even
+      // if an object at this key already exists. Collisions are practically
+      // impossible anyway since keys embed a random nanoid segment.
+      upsert: true,
+    });
+  if (error) {
+    throw new Error(`Storage upload failed: ${error.message}`);
+  }
   return { key };
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
   const key = normalizeKey(relKey);
-  const url = await getSignedUrl(
-    getClient(),
-    new GetObjectCommand({ Bucket: getBucket(), Key: key }),
-    { expiresIn: PRESIGNED_URL_TTL_SECONDS }
-  );
-  return { key, url };
+  const { data, error } = await getClient()
+    .storage.from(getBucket())
+    .createSignedUrl(key, SIGNED_URL_TTL_SECONDS);
+  if (error || !data) {
+    throw new Error(`Storage signed URL failed: ${error?.message ?? "unknown error"}`);
+  }
+  return { key, url: data.signedUrl };
 }

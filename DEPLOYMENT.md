@@ -1,50 +1,40 @@
 # Deployment guide
 
-Everything here reflects what the code actually does — no Manus/Forge proxy, no OAuth, direct Cloudflare R2.
+Everything here reflects what the code actually does — no Manus/Forge proxy, no OAuth, direct Supabase (Postgres + Storage).
 
 ## Prerequisites
 
 - Node.js 22+, pnpm 10+
-- A MySQL/TiDB database (production)
-- A Cloudflare R2 bucket + API token (free — 10GB storage, zero egress fees, no time limit)
+- A Supabase project (free, no credit card) — provides both the Postgres database and file storage
 - GitHub repository
 - Vercel account (or any Node host — Docker instructions are below too)
 - (Optional) Gemini API key for AI enrichment
 
-## 1. Database
+## 1. Supabase project
+
+1. Sign up free at [supabase.com](https://supabase.com) (no card required) and create a new project.
+2. **Database connection strings** — Project Settings → Database → Connection string:
+   - **Pooler** (Supavisor, transaction mode): `postgres://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true` — this is `DATABASE_URL`, used by the running app.
+   - **Direct**: `postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres` — this is `DIRECT_URL`, used only for running migrations. The pooler's transaction mode doesn't support the session-level features DDL (`CREATE TABLE`, etc.) needs.
+3. **Storage** — Storage → Create a new bucket (private is fine and recommended; the app only ever accesses it through its own signed-URL endpoints, never a public bucket policy). Note the bucket name — that's `SUPABASE_STORAGE_BUCKET`.
+4. **API keys** — Project Settings → API:
+   - `SUPABASE_URL` — the Project URL.
+   - `SUPABASE_SERVICE_ROLE_KEY` — the `service_role` secret key (not the `anon` key). This bypasses Row Level Security entirely, which is correct here since the app has no per-user auth — ownership checks happen at the application layer (`sessionId` matching in `bills.ts`), not via RLS. **Never expose this key to the client** — it's only read by server-side code (`server/storage.ts`, `server/_core/env.ts`).
 
 ```bash
-mysql -u root -p -e "CREATE DATABASE aws_bom_builder CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-```
-
-```bash
-export DATABASE_URL="mysql://user:password@host:3306/aws_bom_builder"
+export DIRECT_URL="postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres"
 pnpm drizzle-kit migrate
 ```
 
-This applies `drizzle/0000_good_meltdown.sql`, creating the `bills` and `bom_items` tables. There is no `users` table — this app has no accounts.
+This applies `drizzle/0000_charming_monster_badoon.sql`, creating the `bills` and `bom_items` tables (plus the `bill_status` Postgres enum type). There is no `users` table — this app has no accounts.
 
-## 2. Cloudflare R2
+**One free-tier caveat**: Supabase pauses a project automatically after 7 days with no database activity. It's a one-click unpause from the dashboard, but if you want the deployed app to never go to sleep, add a free scheduled ping (a GitHub Actions cron or an uptime monitor hitting `system.health` every few days) to keep it active.
 
-R2 speaks the S3 API, so the app talks to it with the same `@aws-sdk/client-s3`
-client AWS S3 would use — just pointed at R2's endpoint with R2 credentials.
-Free tier: 10GB storage, zero egress fees, no time limit, no pause behavior.
-
-1. [Cloudflare Dashboard](https://dash.cloudflare.com) → R2 Object Storage → Create bucket.
-   Note the bucket name and your **Account ID** (shown in the R2 overview page).
-2. R2 → Manage API Tokens → Create API Token → scope it to this bucket with
-   Object Read & Write permissions. Save the **Access Key ID** and **Secret
-   Access Key** it gives you (shown once).
-
-That's it — no separate IAM user/policy step like AWS. Downloads go through
-the app's own presigned-URL endpoint (`bills.downloadExcel` / `bills.downloadPdf`),
-not a public bucket, so the bucket itself stays private.
-
-## 3. (Optional) Gemini API key
+## 2. (Optional) Gemini API key
 
 Free, no credit card: [aistudio.google.com/apikey](https://aistudio.google.com/apikey). If you skip this, AI enrichment of ambiguous line items is silently disabled — parsing, consolidation, reconciliation, and Excel export all still work.
 
-## 4. Deploy to Vercel
+## 3. Deploy to Vercel
 
 1. Push this repo to GitHub.
 2. [Vercel Dashboard](https://vercel.com/dashboard) → Add New → Project → Import `kumarwaibhav/AWS-BOM-Builder`.
@@ -52,11 +42,11 @@ Free, no credit card: [aistudio.google.com/apikey](https://aistudio.google.com/a
 
 | Variable | Required | Notes |
 |---|---|---|
-| `DATABASE_URL` | yes | MySQL/TiDB connection string |
-| `R2_ACCOUNT_ID` | yes | Cloudflare account ID (from the R2 overview page) |
-| `R2_ACCESS_KEY_ID` | yes | R2 API token access key |
-| `R2_SECRET_ACCESS_KEY` | yes | R2 API token secret key |
-| `R2_BUCKET` | yes | bucket name |
+| `DATABASE_URL` | yes | Supabase pooler connection string |
+| `DIRECT_URL` | yes | Supabase direct connection string (only used by migrations, but harmless to always set) |
+| `SUPABASE_URL` | yes | Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | `service_role` secret key — server-only, never exposed to the client |
+| `SUPABASE_STORAGE_BUCKET` | yes | bucket name |
 | `GEMINI_API_KEY` | no | enables AI enrichment |
 
 4. Deploy. Vercel's `buildCommand` (see `vercel.json`) runs `vite build` for
@@ -78,16 +68,16 @@ Free, no credit card: [aistudio.google.com/apikey](https://aistudio.google.com/a
    is only used for local dev and Docker; Vercel never touches it.
 5. Verify: `curl https://your-domain.vercel.app/api/trpc/system.health` should return `{"result":{"data":{"ok":true,"database":"connected"}}}`.
 
-## 5. Docker (alternative to Vercel)
+## 4. Docker (alternative to Vercel)
 
 ```bash
 docker build -t aws-bom-builder .
 docker run -p 3000:3000 \
-  -e DATABASE_URL="mysql://..." \
-  -e R2_ACCOUNT_ID="..." \
-  -e R2_ACCESS_KEY_ID="..." \
-  -e R2_SECRET_ACCESS_KEY="..." \
-  -e R2_BUCKET="..." \
+  -e DATABASE_URL="postgres://..." \
+  -e DIRECT_URL="postgresql://..." \
+  -e SUPABASE_URL="https://<project-ref>.supabase.co" \
+  -e SUPABASE_SERVICE_ROLE_KEY="..." \
+  -e SUPABASE_STORAGE_BUCKET="..." \
   aws-bom-builder
 ```
 
@@ -95,19 +85,22 @@ docker run -p 3000:3000 \
 
 ## Rate limiting & security
 
-Already wired into the server (`server/_core/index.ts`), not something you need to add:
+Already wired into the server (`server/_core/app.ts`), not something you need to add:
 - `helmet` security headers
 - `express-rate-limit`: 100 requests / 15 minutes per IP on `/api/trpc`
+- `trust proxy` set correctly for exactly one reverse-proxy hop (Vercel, or Docker behind nginx/ALB)
 - Graceful shutdown on `SIGTERM`/`SIGINT`
 - Structured JSON logs via `server/_core/logger.ts`
 
 ## Troubleshooting
 
-**"Database connection failed"** — check `DATABASE_URL`, confirm the host allows connections from your deploy platform's IPs, hit `system.health` to confirm.
+**"Database connection failed"** — check `DATABASE_URL` is the *pooler* string (not the direct one — the app uses the pooler at runtime), confirm the project isn't paused (Supabase dashboard shows this clearly), hit `system.health` to confirm.
 
-**"Storage not configured" / downloads fail** — verify `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` are set, the API token has Object Read & Write on the bucket, and `R2_BUCKET` matches the bucket name exactly.
+**"Storage not configured" / downloads fail** — verify `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set (the *service role* key specifically, not the `anon` key), and `SUPABASE_STORAGE_BUCKET` matches the bucket name exactly.
 
-**"PDF upload fails with 413"** — the app accepts up to 25 MB PDFs (checked in `server/routers/bills.ts`) with a 50 MB body-parser limit to cover base64 inflation. If your host has its own smaller request-size limit (some serverless platforms cap around 4.5 MB), you'll need a direct-to-R2 upload flow instead of base64-over-tRPC — not implemented here yet.
+**Migrations fail with a connection error** — `drizzle-kit migrate` needs `DIRECT_URL`, not the pooled `DATABASE_URL`; the transaction-mode pooler doesn't support the session features DDL requires.
+
+**"PDF upload fails with 413"** — the app accepts up to 25 MB PDFs (checked in `server/routers/bills.ts`) with a 50 MB body-parser limit to cover base64 inflation. If your host has its own smaller request-size limit (some serverless platforms cap around 4.5 MB), you'll need a direct-to-storage upload flow instead of base64-over-tRPC — not implemented here yet.
 
 **AI enrichment silently not running** — expected if `GEMINI_API_KEY` is unset; check server logs for "AI enrichment is disabled" only if you expected it to run.
 
@@ -121,4 +114,4 @@ git revert HEAD && git push origin main
 
 ---
 
-**Last updated:** to match the codebase as of this rebuild — no Manus runtime, direct Cloudflare R2, optional Gemini enrichment, no authentication.
+**Last updated:** to match the codebase as of this rebuild — no Manus runtime, Supabase (Postgres + Storage), optional Gemini enrichment, no authentication.
