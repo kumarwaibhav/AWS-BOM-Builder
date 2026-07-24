@@ -17,6 +17,14 @@ import { logger } from "./logger";
 export function createApiApp(): Express {
   const app = express();
 
+  // Trust the first proxy hop. Both Vercel and a typical single-layer
+  // reverse-proxy deployment (Docker behind nginx/ALB) sit exactly one hop
+  // in front of this app, so req.ip / X-Forwarded-For need this to resolve
+  // to the real client IP. Without it, express-rate-limit refuses to trust
+  // X-Forwarded-For and logs an ERR_ERL_UNEXPECTED_X_FORWARDED_FOR warning
+  // on every request instead of rate-limiting by real client IP.
+  app.set("trust proxy", 1);
+
   // Security headers. CSP is disabled here because Vite's dev middleware
   // injects inline scripts for HMR; a strict CSP belongs at the CDN/edge
   // layer in production instead of fighting the dev server.

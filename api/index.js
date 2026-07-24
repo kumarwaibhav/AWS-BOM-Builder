@@ -1105,6 +1105,7 @@ async function createContext(opts) {
 // server/_core/app.ts
 function createApiApp() {
   const app = express();
+  app.set("trust proxy", 1);
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
