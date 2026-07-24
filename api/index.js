@@ -571,11 +571,11 @@ function parseAwsBill(text2) {
 var ENV = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   isProduction: process.env.NODE_ENV === "production",
-  aws: {
-    region: process.env.AWS_REGION ?? "us-east-1",
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? "",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? "",
-    bucket: process.env.AWS_S3_BUCKET ?? ""
+  r2: {
+    accountId: process.env.R2_ACCOUNT_ID ?? "",
+    accessKeyId: process.env.R2_ACCESS_KEY_ID ?? "",
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? "",
+    bucket: process.env.R2_BUCKET ?? ""
   },
   gemini: {
     apiKey: process.env.GEMINI_API_KEY ?? "",
@@ -833,25 +833,30 @@ var PRESIGNED_URL_TTL_SECONDS = 60 * 60;
 var client = null;
 function getClient() {
   if (client) return client;
-  if (!ENV.aws.accessKeyId || !ENV.aws.secretAccessKey) {
+  if (!ENV.r2.accountId || !ENV.r2.accessKeyId || !ENV.r2.secretAccessKey) {
     throw new Error(
-      "Storage not configured: set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+      "Storage not configured: set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY"
     );
   }
   client = new S3Client({
-    region: ENV.aws.region,
+    // R2 has no regions — "auto" lets Cloudflare route to the nearest location.
+    region: "auto",
+    endpoint: `https://${ENV.r2.accountId}.r2.cloudflarestorage.com`,
+    // R2 only supports path-style addressing (bucket-in-path), not the
+    // virtual-hosted-style (bucket-in-subdomain) AWS S3 defaults to.
+    forcePathStyle: true,
     credentials: {
-      accessKeyId: ENV.aws.accessKeyId,
-      secretAccessKey: ENV.aws.secretAccessKey
+      accessKeyId: ENV.r2.accessKeyId,
+      secretAccessKey: ENV.r2.secretAccessKey
     }
   });
   return client;
 }
 function getBucket() {
-  if (!ENV.aws.bucket) {
-    throw new Error("Storage not configured: set AWS_S3_BUCKET");
+  if (!ENV.r2.bucket) {
+    throw new Error("Storage not configured: set R2_BUCKET");
   }
-  return ENV.aws.bucket;
+  return ENV.r2.bucket;
 }
 function normalizeKey(relKey) {
   return relKey.replace(/^\/+/, "");
@@ -1056,7 +1061,7 @@ var billsRouter = router({
     const items = await getBomItemsByBill(bill.id);
     return { bill, items };
   }),
-  /** Presigned S3 URL for the generated Excel BOM (re-download anytime). */
+  /** Presigned R2 URL for the generated Excel BOM (re-download anytime). */
   downloadExcel: publicProcedure.input(z2.object({ billId: z2.number().int().positive(), sessionId: z2.string().min(1).max(128) })).mutation(async ({ input }) => {
     const bill = await getBillById(input.billId);
     if (!bill || bill.sessionId !== input.sessionId) {
@@ -1068,7 +1073,7 @@ var billsRouter = router({
     const { url } = await storageGet(bill.excelKey);
     return { url, fileName: bill.fileName.replace(/\.pdf$/i, "") + "-BOM.xlsx" };
   }),
-  /** Presigned S3 URL for the original uploaded PDF. */
+  /** Presigned R2 URL for the original uploaded PDF. */
   downloadPdf: publicProcedure.input(z2.object({ billId: z2.number().int().positive(), sessionId: z2.string().min(1).max(128) })).mutation(async ({ input }) => {
     const bill = await getBillById(input.billId);
     if (!bill || bill.sessionId !== input.sessionId) {

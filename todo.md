@@ -5,7 +5,7 @@
 - Removed the Manus app-builder runtime entirely: OAuth login flow, `users` table,
   `vite-plugin-manus-runtime`, and ~2,300 lines of unused scaffolding (dashboard/sidebar
   template, chat box, map, voice transcription, image generation) are gone.
-- Storage now genuinely uses AWS S3 directly (`@aws-sdk/client-s3` + presigned URLs) —
+- Storage now genuinely uses Cloudflare R2 directly (`@aws-sdk/client-s3` against R2's S3-compatible endpoint + presigned URLs) —
   previously routed through a third-party hosted proxy despite docs claiming otherwise.
 - AI enrichment calls Google Gemini's free tier directly; gracefully no-ops without a key.
 - Fixed a real bug: the reconciliation check always showed green regardless of whether

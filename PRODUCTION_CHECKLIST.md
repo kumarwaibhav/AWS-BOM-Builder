@@ -15,10 +15,10 @@ Reflects what's actually implemented as of this rebuild — check items are only
 - [ ] Indexes on `bills.sessionId`, `bills.createdAt`, `bom_items.billId` (add via a migration if query volume grows — not auto-created by the base schema)
 - [ ] Backup strategy in place (e.g. scheduled `mysqldump`, or your managed DB provider's snapshot feature)
 
-## AWS S3
+## Cloudflare R2
 - [ ] Bucket created, private (no public bucket policy needed — the app uses presigned URLs)
-- [ ] IAM user scoped to `PutObject`/`GetObject` on that bucket only
-- [ ] `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET` set in your deploy environment
+- [ ] API token scoped to Object Read & Write on that bucket only
+- [ ] `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` set in your deploy environment
 
 ## Features (verified working end-to-end in this rebuild)
 - [x] PDF upload + parsing

@@ -1,12 +1,12 @@
 # Deployment guide
 
-Everything here reflects what the code actually does — no Manus/Forge proxy, no OAuth, direct AWS S3.
+Everything here reflects what the code actually does — no Manus/Forge proxy, no OAuth, direct Cloudflare R2.
 
 ## Prerequisites
 
 - Node.js 22+, pnpm 10+
 - A MySQL/TiDB database (production)
-- An AWS S3 bucket + IAM user with S3 access
+- A Cloudflare R2 bucket + API token (free — 10GB storage, zero egress fees, no time limit)
 - GitHub repository
 - Vercel account (or any Node host — Docker instructions are below too)
 - (Optional) Gemini API key for AI enrichment
@@ -24,34 +24,21 @@ pnpm drizzle-kit migrate
 
 This applies `drizzle/0000_good_meltdown.sql`, creating the `bills` and `bom_items` tables. There is no `users` table — this app has no accounts.
 
-## 2. AWS S3
+## 2. Cloudflare R2
 
-```bash
-aws s3 mb s3://aws-bom-builder-storage --region us-east-1
-```
+R2 speaks the S3 API, so the app talks to it with the same `@aws-sdk/client-s3`
+client AWS S3 would use — just pointed at R2's endpoint with R2 credentials.
+Free tier: 10GB storage, zero egress fees, no time limit, no pause behavior.
 
-Create an IAM user scoped to just this bucket (avoid `AmazonS3FullAccess` in production — scope the policy to the specific bucket ARN):
+1. [Cloudflare Dashboard](https://dash.cloudflare.com) → R2 Object Storage → Create bucket.
+   Note the bucket name and your **Account ID** (shown in the R2 overview page).
+2. R2 → Manage API Tokens → Create API Token → scope it to this bucket with
+   Object Read & Write permissions. Save the **Access Key ID** and **Secret
+   Access Key** it gives you (shown once).
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject"],
-      "Resource": "arn:aws:s3:::aws-bom-builder-storage/*"
-    }
-  ]
-}
-```
-
-```bash
-aws iam create-user --user-name aws-bom-builder-app
-aws iam put-user-policy --user-name aws-bom-builder-app --policy-name s3-bucket-access --policy-document file://policy.json
-aws iam create-access-key --user-name aws-bom-builder-app
-```
-
-Downloads go through the app's own presigned-URL endpoint (`bills.downloadExcel` / `bills.downloadPdf`), not a public bucket policy — the bucket itself can (and should) stay private.
+That's it — no separate IAM user/policy step like AWS. Downloads go through
+the app's own presigned-URL endpoint (`bills.downloadExcel` / `bills.downloadPdf`),
+not a public bucket, so the bucket itself stays private.
 
 ## 3. (Optional) Gemini API key
 
@@ -66,10 +53,10 @@ Free, no credit card: [aistudio.google.com/apikey](https://aistudio.google.com/a
 | Variable | Required | Notes |
 |---|---|---|
 | `DATABASE_URL` | yes | MySQL/TiDB connection string |
-| `AWS_REGION` | yes | e.g. `us-east-1` |
-| `AWS_ACCESS_KEY_ID` | yes | IAM user access key |
-| `AWS_SECRET_ACCESS_KEY` | yes | IAM user secret key |
-| `AWS_S3_BUCKET` | yes | bucket name |
+| `R2_ACCOUNT_ID` | yes | Cloudflare account ID (from the R2 overview page) |
+| `R2_ACCESS_KEY_ID` | yes | R2 API token access key |
+| `R2_SECRET_ACCESS_KEY` | yes | R2 API token secret key |
+| `R2_BUCKET` | yes | bucket name |
 | `GEMINI_API_KEY` | no | enables AI enrichment |
 
 4. Deploy. Vercel's `buildCommand` (see `vercel.json`) runs `vite build` for
@@ -97,10 +84,10 @@ Free, no credit card: [aistudio.google.com/apikey](https://aistudio.google.com/a
 docker build -t aws-bom-builder .
 docker run -p 3000:3000 \
   -e DATABASE_URL="mysql://..." \
-  -e AWS_REGION="us-east-1" \
-  -e AWS_ACCESS_KEY_ID="..." \
-  -e AWS_SECRET_ACCESS_KEY="..." \
-  -e AWS_S3_BUCKET="..." \
+  -e R2_ACCOUNT_ID="..." \
+  -e R2_ACCESS_KEY_ID="..." \
+  -e R2_SECRET_ACCESS_KEY="..." \
+  -e R2_BUCKET="..." \
   aws-bom-builder
 ```
 
@@ -118,9 +105,9 @@ Already wired into the server (`server/_core/index.ts`), not something you need 
 
 **"Database connection failed"** — check `DATABASE_URL`, confirm the host allows connections from your deploy platform's IPs, hit `system.health` to confirm.
 
-**"S3 access denied" / downloads fail** — verify the IAM policy grants `GetObject`/`PutObject` on the exact bucket ARN, and that `AWS_S3_BUCKET` matches.
+**"Storage not configured" / downloads fail** — verify `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` are set, the API token has Object Read & Write on the bucket, and `R2_BUCKET` matches the bucket name exactly.
 
-**"PDF upload fails with 413"** — the app accepts up to 25 MB PDFs (checked in `server/routers/bills.ts`) with a 50 MB body-parser limit to cover base64 inflation. If your host has its own smaller request-size limit (some serverless platforms cap around 4.5 MB), you'll need a direct-to-S3 upload flow instead of base64-over-tRPC — not implemented here yet.
+**"PDF upload fails with 413"** — the app accepts up to 25 MB PDFs (checked in `server/routers/bills.ts`) with a 50 MB body-parser limit to cover base64 inflation. If your host has its own smaller request-size limit (some serverless platforms cap around 4.5 MB), you'll need a direct-to-R2 upload flow instead of base64-over-tRPC — not implemented here yet.
 
 **AI enrichment silently not running** — expected if `GEMINI_API_KEY` is unset; check server logs for "AI enrichment is disabled" only if you expected it to run.
 
@@ -134,4 +121,4 @@ git revert HEAD && git push origin main
 
 ---
 
-**Last updated:** to match the codebase as of this rebuild — no Manus runtime, direct S3, optional Gemini enrichment, no authentication.
+**Last updated:** to match the codebase as of this rebuild — no Manus runtime, direct Cloudflare R2, optional Gemini enrichment, no authentication.

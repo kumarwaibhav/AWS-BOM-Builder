@@ -1,6 +1,10 @@
 /**
- * AWS S3-backed storage — direct, no third-party proxy.
- * Uploads via PutObjectCommand; downloads via short-lived presigned GET URLs.
+ * Cloudflare R2-backed storage — direct, no third-party proxy.
+ * R2 speaks the S3 API, so this uses the same @aws-sdk/client-s3 client as
+ * AWS S3 would, just pointed at R2's S3-compatible endpoint with R2
+ * credentials. Uploads via PutObjectCommand; downloads via short-lived
+ * presigned GET URLs. R2's free tier (10GB storage, no egress fees, no
+ * time limit) makes this genuinely free at this app's scale, unlike AWS S3.
  */
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -12,26 +16,31 @@ let client: S3Client | null = null;
 
 function getClient(): S3Client {
   if (client) return client;
-  if (!ENV.aws.accessKeyId || !ENV.aws.secretAccessKey) {
+  if (!ENV.r2.accountId || !ENV.r2.accessKeyId || !ENV.r2.secretAccessKey) {
     throw new Error(
-      "Storage not configured: set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+      "Storage not configured: set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY"
     );
   }
   client = new S3Client({
-    region: ENV.aws.region,
+    // R2 has no regions — "auto" lets Cloudflare route to the nearest location.
+    region: "auto",
+    endpoint: `https://${ENV.r2.accountId}.r2.cloudflarestorage.com`,
+    // R2 only supports path-style addressing (bucket-in-path), not the
+    // virtual-hosted-style (bucket-in-subdomain) AWS S3 defaults to.
+    forcePathStyle: true,
     credentials: {
-      accessKeyId: ENV.aws.accessKeyId,
-      secretAccessKey: ENV.aws.secretAccessKey,
+      accessKeyId: ENV.r2.accessKeyId,
+      secretAccessKey: ENV.r2.secretAccessKey,
     },
   });
   return client;
 }
 
 function getBucket(): string {
-  if (!ENV.aws.bucket) {
-    throw new Error("Storage not configured: set AWS_S3_BUCKET");
+  if (!ENV.r2.bucket) {
+    throw new Error("Storage not configured: set R2_BUCKET");
   }
-  return ENV.aws.bucket;
+  return ENV.r2.bucket;
 }
 
 function normalizeKey(relKey: string): string {

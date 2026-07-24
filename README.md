@@ -24,7 +24,7 @@ This is the AWS converter in what will become a multi-cloud BOM toolset (GCP, Az
 | Frontend | React 19, Tailwind CSS 4, shadcn/ui, wouter |
 | Backend | Express 4, tRPC 11, Superjson |
 | Database | MySQL/TiDB via Drizzle ORM |
-| Storage | AWS S3 (direct, presigned URLs — `@aws-sdk/client-s3`) |
+| Storage | Cloudflare R2 (S3-compatible API, presigned URLs — `@aws-sdk/client-s3`) |
 | PDF parsing | pdf-parse |
 | Excel generation | ExcelJS |
 | AI enrichment | Google Gemini (free tier), optional |
@@ -53,7 +53,7 @@ AWS-BOM-Builder/
 │   ├── consolidation.ts     # Savings Plan pair merging
 │   ├── enrichment.ts        # optional Gemini classification
 │   ├── excel.ts             # BOM → .xlsx
-│   ├── storage.ts           # S3 put/get + presigned URLs
+│   ├── storage.ts           # R2 put/get + presigned URLs
 │   └── db.ts                # Drizzle query helpers
 ├── drizzle/                 # schema + migrations
 └── shared/const.ts          # constants shared between client and server
@@ -66,7 +66,7 @@ AWS-BOM-Builder/
 - Node.js 22+
 - pnpm 10+ (`corepack enable` will pick up the pinned version automatically)
 - A MySQL or TiDB database
-- An AWS S3 bucket + IAM credentials
+- A Cloudflare R2 bucket + API token (free — 10GB storage, no egress fees, no time limit)
 - (Optional) A free Gemini API key from [aistudio.google.com](https://aistudio.google.com/apikey) — no credit card required
 
 ### Installation
@@ -77,7 +77,7 @@ cd AWS-BOM-Builder
 pnpm install
 
 cp .env.example .env
-# fill in DATABASE_URL, AWS_*, and (optionally) GEMINI_API_KEY
+# fill in DATABASE_URL, R2_*, and (optionally) GEMINI_API_KEY
 
 pnpm drizzle-kit generate   # only needed if you change drizzle/schema.ts
 pnpm drizzle-kit migrate    # applies drizzle/*.sql against DATABASE_URL
@@ -96,8 +96,8 @@ All endpoints are public and use a client-generated `sessionId` for scoping — 
 | `bills.uploadAndParse` | mutation | Upload a base64-encoded PDF, parse, enrich, store, return `{ billId, itemCount }` |
 | `bills.list` | query | List bills for a `sessionId` |
 | `bills.get` | query | Fetch one bill + its BOM line items |
-| `bills.downloadExcel` | mutation | Presigned S3 URL for the generated `.xlsx` |
-| `bills.downloadPdf` | mutation | Presigned S3 URL for the original PDF |
+| `bills.downloadExcel` | mutation | Presigned R2 URL for the generated `.xlsx` |
+| `bills.downloadPdf` | mutation | Presigned R2 URL for the original PDF |
 | `bills.remove` | mutation | Delete a bill and its line items |
 | `system.health` | query | Liveness/readiness — reports DB connectivity |
 
@@ -120,7 +120,7 @@ pnpm test --coverage   # with coverage
 ## Security notes
 
 - No accounts, no personal data collected — only AWS billing data, scoped by an anonymous session id
-- S3 presigned URLs expire after 1 hour
+- R2 presigned URLs expire after 1 hour
 - API is rate-limited (100 requests / 15 min per IP) and served behind `helmet` security headers
 - **Never commit `.env` or any file containing real credentials.** `.gitignore` excludes `.env*`; use `.env.example` as the template.
 
