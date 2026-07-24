@@ -12,4 +12,3 @@ dist/
 *~
 .turbo/
 coverage/
-api/index.js

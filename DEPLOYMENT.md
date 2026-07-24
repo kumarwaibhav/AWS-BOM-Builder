@@ -72,8 +72,20 @@ Free, no credit card: [aistudio.google.com/apikey](https://aistudio.google.com/a
 | `AWS_S3_BUCKET` | yes | bucket name |
 | `GEMINI_API_KEY` | no | enables AI enrichment |
 
-4. Deploy. Vercel runs `vite build` for the client (output: `dist/public`) and
-   automatically builds `api/index.ts` as a serverless function — the API and
+4. Deploy. Vercel's `buildCommand` (see `vercel.json`) runs `vite build` for
+   the client (output: `dist/public`) and then `pnpm run build:vercel-api`,
+   which esbuild-bundles `server/_core/vercelHandler.ts` into a single
+   self-contained `api/index.js` — the actual deployed serverless function.
+   That file is committed to the repo (not gitignored) because Vercel matches
+   the `functions` pattern in `vercel.json` against the *source* tree before
+   the build runs, so a placeholder has to exist there already; the build
+   always overwrites it with a fresh bundle from current source before
+   deploying, so the committed copy never goes stale in what actually ships.
+   Bundling (rather than letting Vercel's own per-file TypeScript-to-function
+   pipeline handle `server/_core/*` directly) avoids two failure modes seen
+   during setup: its isolated type-check can reject code our own project
+   tsconfig accepts, and it doesn't reliably inline cross-directory relative
+   imports, which crashes at runtime with `ERR_MODULE_NOT_FOUND`. The API and
    the client are genuinely separate deployables here, not one long-running
    process. `server/_core/index.ts` (the traditional `app.listen()` server)
    is only used for local dev and Docker; Vercel never touches it.
