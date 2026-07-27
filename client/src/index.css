@@ -48,15 +48,15 @@
      Controls (buttons, inputs, nav) stay sharp-cornered; only glass panels
      get a small deliberate radius — the split is what keeps this from
      reading as generic bubble-glass. */
-  --swiss-red: oklch(0.55 0.22 27);
-  --primary: oklch(0.55 0.22 27);
+  --swiss-red: oklch(0.6 0.215 30);
+  --primary: oklch(0.6 0.215 30);
   --primary-foreground: oklch(1 0 0);
-  --sidebar-primary: oklch(0.55 0.22 27);
+  --sidebar-primary: oklch(0.6 0.215 30);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --chart-1: oklch(0.55 0.22 27);
+  --chart-1: oklch(0.6 0.215 30);
   --chart-2: oklch(0 0 0);
   --chart-3: oklch(0.45 0 0);
-  --chart-4: oklch(0.65 0.18 27);
+  --chart-4: oklch(0.65 0.18 30);
   --chart-5: oklch(0.75 0 0);
   --radius: 0rem;
   --radius-glass: 0.75rem;
@@ -72,17 +72,17 @@
   --muted-foreground: oklch(0.42 0 0);
   --accent: oklch(0.955 0 0);
   --accent-foreground: oklch(0.08 0 0);
-  --destructive: oklch(0.55 0.22 27);
+  --destructive: oklch(0.6 0.215 30);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.08 0 0);
   --input: oklch(0.08 0 0);
-  --ring: oklch(0.55 0.22 27);
+  --ring: oklch(0.6 0.215 30);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.08 0 0);
   --sidebar-accent: oklch(0.955 0 0);
   --sidebar-accent-foreground: oklch(0.08 0 0);
   --sidebar-border: oklch(0.08 0 0);
-  --sidebar-ring: oklch(0.55 0.22 27);
+  --sidebar-ring: oklch(0.6 0.215 30);
 
   /* Glass material tokens */
   --glass-bg: rgba(255, 255, 255, 0.55);
@@ -96,16 +96,16 @@
     0 1px 1px rgba(10, 10, 10, 0.03),
     0 8px 24px rgba(10, 10, 10, 0.06),
     0 24px 48px -12px rgba(10, 10, 10, 0.08);
-  --glass-shadow-red: 0 12px 32px -8px oklch(0.55 0.22 27 / 22%);
+  --glass-shadow-red: 0 12px 32px -8px oklch(0.6 0.215 30 / 22%);
 }
 
 .dark {
   /* Brand-consistent dark mode: the same SISL red carries over instead of a
      generic blue swap, so primary actions, links, and focus rings stay
      on-brand when the theme switches. */
-  --primary: oklch(0.68 0.19 27);
+  --primary: oklch(0.73 0.185 30);
   --primary-foreground: oklch(0.12 0 0);
-  --sidebar-primary: oklch(0.68 0.19 27);
+  --sidebar-primary: oklch(0.73 0.185 30);
   --sidebar-primary-foreground: oklch(0.12 0 0);
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.92 0.005 65);
@@ -119,27 +119,35 @@
   --muted-foreground: oklch(0.72 0.012 286.067);
   --accent: oklch(0.274 0.006 286.033);
   --accent-foreground: oklch(0.94 0.005 65);
-  --destructive: oklch(0.7 0.19 27);
+  --destructive: oklch(0.7 0.19 30);
   --destructive-foreground: oklch(0.12 0 0);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.68 0.19 27);
-  --chart-1: oklch(0.68 0.19 27);
+  --ring: oklch(0.73 0.185 30);
+  --chart-1: oklch(0.73 0.185 30);
   --chart-2: oklch(0.92 0 0);
   --chart-3: oklch(0.7 0 0);
-  --chart-4: oklch(0.55 0.17 27);
+  --chart-4: oklch(0.55 0.17 30);
   --chart-5: oklch(0.45 0 0);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.92 0.005 65);
   --sidebar-accent: oklch(0.274 0.006 286.033);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.68 0.19 27);
+  --sidebar-ring: oklch(0.73 0.185 30);
 
   /* Glass, re-tuned for a dark backdrop. Light-mode glass frosts white;
      dark-mode glass frosts with a faint light rim over near-black, so
-     panels read as "glass over dark", not grey fog. */
-  --glass-bg: rgba(255, 255, 255, 0.05);
+     panels read as "glass over dark", not grey fog.
+     --glass-bg was 0.05 (barely-there white haze) -- at that opacity the
+     app-backdrop's hairline grid/glow behind a card reads as clearly
+     visible lines cutting through the card rather than a soft frosted
+     blur (reported directly against the live dark-mode Home page: grid
+     visibly bleeding through the hero/upload/step cards). Raised to a
+     dark-tinted, mostly-opaque fill so the blur still gives genuine glass
+     depth at the edges without letting the grid pattern read as distinct
+     lines through the middle of a card. */
+  --glass-bg: rgba(20, 20, 24, 0.88);
   --glass-bg-strong: rgba(18, 18, 21, 0.96);
   --glass-bg-red: rgba(255, 90, 70, 0.1);
   --glass-border: rgba(255, 255, 255, 0.1);
@@ -149,7 +157,7 @@
     0 1px 1px rgba(0, 0, 0, 0.3),
     0 8px 24px rgba(0, 0, 0, 0.35),
     0 24px 48px -12px rgba(0, 0, 0, 0.55);
-  --glass-shadow-red: 0 12px 32px -8px oklch(0.68 0.19 27 / 30%);
+  --glass-shadow-red: 0 12px 32px -8px oklch(0.73 0.185 30 / 30%);
 }
 
 @layer base {
@@ -220,8 +228,8 @@
     z-index: -1;
     pointer-events: none;
     background-image:
-      radial-gradient(ellipse 900px 600px at 100% -10%, oklch(0.55 0.22 27 / 7%), transparent 60%),
-      radial-gradient(ellipse 800px 700px at -10% 100%, oklch(0.55 0.22 27 / 5%), transparent 60%),
+      radial-gradient(ellipse 900px 600px at 100% -10%, oklch(0.6 0.215 30 / 7%), transparent 60%),
+      radial-gradient(ellipse 800px 700px at -10% 100%, oklch(0.6 0.215 30 / 5%), transparent 60%),
       repeating-linear-gradient(to right, rgba(10,10,10,0.035) 0 1px, transparent 1px 64px),
       repeating-linear-gradient(to bottom, rgba(10,10,10,0.035) 0 1px, transparent 1px 64px);
     background-color: #ffffff;
@@ -229,8 +237,8 @@
 
   .dark .app-backdrop {
     background-image:
-      radial-gradient(ellipse 900px 600px at 100% -10%, oklch(0.68 0.19 27 / 14%), transparent 60%),
-      radial-gradient(ellipse 800px 700px at -10% 100%, oklch(0.68 0.19 27 / 10%), transparent 60%),
+      radial-gradient(ellipse 900px 600px at 100% -10%, oklch(0.73 0.185 30 / 14%), transparent 60%),
+      radial-gradient(ellipse 800px 700px at -10% 100%, oklch(0.73 0.185 30 / 10%), transparent 60%),
       repeating-linear-gradient(to right, rgba(255,255,255,0.045) 0 1px, transparent 1px 64px),
       repeating-linear-gradient(to bottom, rgba(255,255,255,0.045) 0 1px, transparent 1px 64px);
     background-color: oklch(0.141 0.005 285.823);
@@ -278,7 +286,7 @@
     background: linear-gradient(135deg, var(--glass-bg-red), var(--glass-bg));
     backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
-    border: 1px solid oklch(0.55 0.22 27 / 20%);
+    border: 1px solid oklch(0.6 0.215 30 / 20%);
     border-radius: var(--radius-glass);
     box-shadow: var(--glass-shadow-red);
     isolation: isolate;

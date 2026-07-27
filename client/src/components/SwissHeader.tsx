@@ -19,7 +19,7 @@ export default function SwissHeader() {
       <div className="mx-auto max-w-7xl px-4 sm:px-8 flex items-stretch justify-between h-16">
         <div className="flex items-center gap-4 min-w-0">
           <Link href="/" className="flex items-center shrink-0" aria-label="SISL">
-            <SislLogo height={24} />
+            <SislLogo height={38} />
           </Link>
           <span
             className="hidden sm:block w-px h-6 bg-[var(--glass-border-strong)] shrink-0"

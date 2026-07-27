@@ -27,18 +27,33 @@ function fmtCost(c: string): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Fixed percentage widths so the table always fits its container -- no
+// horizontal scroll needed to see the last column (AWS Billed Cost USD),
+// which is exactly what "table-layout: auto" (the default) doesn't
+// guarantee: it sizes each column to its widest content, and with 8
+// columns of real bill data that total reliably exceeds the viewport,
+// leaving the last column(s) cut off. table-fixed + these <col> widths
+// pin the total to 100% instead; longer text wraps within its column
+// rather than pushing the table wider.
+const COLUMN_WIDTHS = ["4%", "10%", "13%", "12%", "37%", "7%", "6%", "11%"] as const;
+
 export default function BomTable({ items }: { items: BomItem[] }) {
   const total = items.reduce((s, i) => s + Number(i.costUsd), 0);
 
   return (
     <div className="overflow-x-auto glass">
-      <table className="w-full text-left text-xs sm:text-[13px] border-collapse">
+      <table className="w-full table-fixed text-left text-xs sm:text-[13px] border-collapse">
+        <colgroup>
+          {COLUMN_WIDTHS.map((w, i) => (
+            <col key={i} style={{ width: w }} />
+          ))}
+        </colgroup>
         <thead>
           <tr className="bg-black text-white dark:bg-white dark:text-black">
             {HEADERS.map(h => (
               <th
                 key={h}
-                className="px-3 py-2.5 font-semibold uppercase tracking-wider whitespace-nowrap border-r border-white/20 dark:border-black/20 last:border-r-0">
+                className="px-3 py-2.5 font-semibold uppercase tracking-wider border-r border-white/20 dark:border-black/20 last:border-r-0">
                 {h}
               </th>
             ))}
@@ -52,8 +67,8 @@ export default function BomTable({ items }: { items: BomItem[] }) {
               <td className="px-3 py-2 font-mono text-muted-foreground border-r border-neutral-200 dark:border-white/10">
                 {item.serialNo}
               </td>
-              <td className="px-3 py-2 whitespace-nowrap border-r border-neutral-200 dark:border-white/10">{item.region}</td>
-              <td className="px-3 py-2 whitespace-nowrap border-r border-neutral-200 dark:border-white/10">
+              <td className="px-3 py-2 break-words border-r border-neutral-200 dark:border-white/10">{item.region}</td>
+              <td className="px-3 py-2 break-words border-r border-neutral-200 dark:border-white/10">
                 {item.serviceCategory}
                 {item.llmEnriched === 1 && (
                   <ChevronMark
@@ -63,12 +78,12 @@ export default function BomTable({ items }: { items: BomItem[] }) {
                   />
                 )}
               </td>
-              <td className="px-3 py-2 border-r border-neutral-200 dark:border-white/10">{item.serviceName}</td>
-              <td className="px-3 py-2 border-r border-neutral-200 dark:border-white/10 max-w-[420px]">{item.description}</td>
+              <td className="px-3 py-2 break-words border-r border-neutral-200 dark:border-white/10">{item.serviceName}</td>
+              <td className="px-3 py-2 break-words border-r border-neutral-200 dark:border-white/10">{item.description}</td>
               <td className="px-3 py-2 text-right font-mono whitespace-nowrap border-r border-neutral-200 dark:border-white/10">
                 {fmtQty(item.quantity)}
               </td>
-              <td className="px-3 py-2 whitespace-nowrap border-r border-neutral-200 dark:border-white/10">{item.uom || "N/A"}</td>
+              <td className="px-3 py-2 break-words border-r border-neutral-200 dark:border-white/10">{item.uom || "N/A"}</td>
               <td
                 className={`px-3 py-2 text-right font-mono whitespace-nowrap ${
                   Number(item.costUsd) < 0 ? "text-primary" : ""

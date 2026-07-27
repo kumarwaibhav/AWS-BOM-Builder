@@ -93,7 +93,7 @@ export default function BillDetail() {
                       Bill of Materials
                     </span>
                   </div>
-                  <h1 className="text-2xl sm:text-4xl font-black tracking-tighter uppercase break-all">
+                  <h1 className="text-lg sm:text-2xl font-bold tracking-tight uppercase break-all">
                     {data.bill.fileName.replace(/\.pdf$/i, "")}
                   </h1>
                 </div>
