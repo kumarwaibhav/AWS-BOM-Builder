@@ -835,7 +835,7 @@ async function generateBomExcel(rows, meta) {
     cell.font = { bold: true, size: 11, name: "Arial" };
     cell.border = { top: { style: "medium" }, bottom: { style: "medium" } };
   });
-  totalRow.getCell(8).numFmt = "#,##0.00";
+  totalRow.getCell(8).numFmt = '"$"#,##0.00';
   const info = wb.addWorksheet("Bill Info");
   info.columns = [
     { header: "Field", key: "f", width: 30 },
@@ -845,9 +845,17 @@ async function generateBomExcel(rows, meta) {
   info.addRow({ f: "Source File", v: meta.fileName });
   info.addRow({ f: "Billing Period", v: meta.billingPeriod ?? "N/A" });
   info.addRow({ f: "Account ID", v: meta.accountId ?? "N/A" });
-  info.addRow({ f: "Estimated Grand Total (USD, incl. tax)", v: meta.grandTotalUsd ?? "N/A" });
+  const grandTotalInfoRow = info.addRow({
+    f: "Estimated Grand Total (USD, incl. tax)",
+    v: meta.grandTotalUsd ?? "N/A"
+  });
+  if (meta.grandTotalUsd !== null) grandTotalInfoRow.getCell(2).numFmt = '"$"#,##0.00';
   info.addRow({ f: "Line Items", v: rows.length });
-  info.addRow({ f: "Pre-tax Line-Item Total (USD)", v: Math.round(totalCost * 100) / 100 });
+  const preTaxTotalInfoRow = info.addRow({
+    f: "Pre-tax Line-Item Total (USD)",
+    v: Math.round(totalCost * 100) / 100
+  });
+  preTaxTotalInfoRow.getCell(2).numFmt = '"$"#,##0.00';
   info.addRow({ f: "Generated", v: (/* @__PURE__ */ new Date()).toISOString() });
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);

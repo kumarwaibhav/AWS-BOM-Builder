@@ -84,7 +84,7 @@ export default function BomTable({ items }: { items: BomItem[] }) {
               Total (pre-tax)
             </td>
             <td className="px-3 py-2.5 text-right font-mono font-bold">
-              {total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </td>
           </tr>
         </tfoot>

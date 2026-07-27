@@ -129,7 +129,7 @@ export default function BillDetail() {
                 <Stat label="Billing Period" value={data.bill.billingPeriod || "N/A"} />
                 <Stat label="Account ID" value={data.bill.accountId || "N/A"} />
                 <Stat label="Line Items" value={String(data.bill.itemCount)} />
-                <Stat label="Grand Total (USD)" value={grandTotal !== null ? usd(grandTotal) : "N/A"} />
+                <Stat label="Grand Total (USD)" value={grandTotal !== null ? `$${usd(grandTotal)}` : "N/A"} />
               </div>
 
               {data.items.length === 0 && grandTotal !== null ? (
