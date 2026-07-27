@@ -7,7 +7,6 @@ import { AlertCircle, Home } from "lucide-react";
 import { useLocation } from "wouter";
 import SwissHeader from "@/components/SwissHeader";
 import SwissFooter from "@/components/SwissFooter";
-import ChevronMark from "@/components/ChevronMark";
 
 export default function NotFound() {
   const [, setLocation] = useLocation();
@@ -19,7 +18,6 @@ export default function NotFound() {
       <main className="flex-1 flex items-center justify-center px-4 py-16">
         <div className="glass w-full max-w-lg p-10 sm:p-12 text-center">
           <div className="flex items-center justify-center gap-2 mb-6">
-            <ChevronMark size={13} />
             <span className="text-xs font-mono uppercase tracking-[0.25em] text-muted-foreground">
               Not Found
             </span>

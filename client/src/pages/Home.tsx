@@ -196,7 +196,6 @@ export default function Home() {
               <div key={s.n} className="glass p-6 min-h-[180px] flex flex-col">
                 <div className="flex items-center justify-between mb-6">
                   <span className="font-mono text-xs text-muted-foreground">{s.n}</span>
-                  <ChevronMark size={13} />
                 </div>
                 <h3 className="font-black uppercase tracking-tight text-lg">{s.t}</h3>
                 <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed">{s.d}</p>

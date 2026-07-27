@@ -1,10 +1,9 @@
 /**
- * Swiss-glass top navigation: frosted bar, fine hairline, SISL wordmark and
- * chevron. Fully public, no accounts, no sign-in.
+ * Swiss-glass top navigation: frosted bar, fine hairline, SISL logo.
+ * Fully public, no accounts, no sign-in.
  */
 import { Link, useLocation } from "wouter";
 import SislLogo from "./SislLogo";
-import ChevronMark from "./ChevronMark";
 import ThemeToggle from "./ThemeToggle";
 
 export default function SwissHeader() {
@@ -26,16 +25,9 @@ export default function SwissHeader() {
             className="hidden sm:block w-px h-6 bg-[var(--glass-border-strong)] shrink-0"
             aria-hidden="true"
           />
-          <Link href="/" className="hidden sm:flex items-center gap-2 group min-w-0">
+          <Link href="/" className="hidden sm:flex items-center min-w-0">
             <span className="font-black tracking-tight text-lg leading-none uppercase whitespace-nowrap">
-              AWS Bill
-            </span>
-            <ChevronMark
-              size={16}
-              className="transition-transform duration-200 group-hover:translate-x-1"
-            />
-            <span className="font-black tracking-tight text-lg leading-none uppercase whitespace-nowrap">
-              BOM
+              AWS Bill to BOM
             </span>
           </Link>
         </div>

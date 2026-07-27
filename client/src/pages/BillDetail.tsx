@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import SwissHeader from "@/components/SwissHeader";
 import SwissFooter from "@/components/SwissFooter";
-import ChevronMark from "@/components/ChevronMark";
 import BomTable from "@/components/BomTable";
 import { trpc } from "@/lib/trpc";
 import { useSessionId } from "@/hooks/useSessionId";
@@ -82,7 +81,6 @@ export default function BillDetail() {
               <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8">
                 <div>
                   <div className="flex items-center gap-2 mb-3">
-                    <ChevronMark size={13} />
                     <span className="text-xs font-mono uppercase tracking-[0.25em] text-muted-foreground">
                       Bill of Materials
                     </span>
@@ -156,7 +154,6 @@ export default function BillDetail() {
               )}
 
               <div className="flex items-center gap-2 mb-3">
-                <ChevronMark size={12} />
                 <span className="text-xs font-mono uppercase tracking-[0.2em] text-muted-foreground">
                   {data.items.length} line items · chevron mark = AI-classified
                 </span>

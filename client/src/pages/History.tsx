@@ -9,7 +9,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import SwissHeader from "@/components/SwissHeader";
 import SwissFooter from "@/components/SwissFooter";
-import ChevronMark from "@/components/ChevronMark";
 import { trpc } from "@/lib/trpc";
 import { useSessionId } from "@/hooks/useSessionId";
 
@@ -72,7 +71,6 @@ export default function History() {
       <main className="flex-1">
         <div className="mx-auto max-w-7xl px-4 sm:px-8 py-10">
           <div className="flex items-center gap-2 mb-3">
-            <ChevronMark size={13} />
             <span className="text-xs font-mono uppercase tracking-[0.25em] text-muted-foreground">
               Archive
             </span>

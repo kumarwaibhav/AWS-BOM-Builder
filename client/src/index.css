@@ -86,7 +86,7 @@
 
   /* Glass material tokens */
   --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.78);
+  --glass-bg-strong: rgba(255, 255, 255, 0.96);
   --glass-bg-red: rgba(200, 45, 45, 0.08);
   --glass-border: rgba(10, 10, 10, 0.09);
   --glass-border-strong: rgba(10, 10, 10, 0.16);
@@ -140,7 +140,7 @@
      dark-mode glass frosts with a faint light rim over near-black, so
      panels read as "glass over dark", not grey fog. */
   --glass-bg: rgba(255, 255, 255, 0.05);
-  --glass-bg-strong: rgba(24, 24, 27, 0.82);
+  --glass-bg-strong: rgba(18, 18, 21, 0.96);
   --glass-bg-red: rgba(255, 90, 70, 0.1);
   --glass-border: rgba(255, 255, 255, 0.1);
   --glass-border-strong: rgba(255, 255, 255, 0.16);
