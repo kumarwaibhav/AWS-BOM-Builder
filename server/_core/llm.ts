@@ -41,16 +41,36 @@ export type InvokeResult = {
 
 /**
  * Gemini's structured-output schema is JSON Schema minus a couple of fields
- * OpenAI allows (e.g. `additionalProperties`, `const`). Strip what Gemini
- * rejects; nested objects/arrays/enums all pass through untouched.
+ * OpenAI allows. Two differences matter here:
+ *  - `additionalProperties` isn't recognised and must be stripped.
+ *  - `type` is a single non-repeating enum field in Gemini's proto — it has
+ *    no union-type support. OpenAI's Structured Outputs convention for a
+ *    nullable field is `type: ["string", "null"]`; sending that array to
+ *    Gemini fails every request with a 400 ("Proto field is not repeating,
+ *    cannot start list"), which is exactly what production was hitting on
+ *    every enrichment batch (confirmed via live runtime logs 2026-07-27).
+ *    Gemini's equivalent is `type: "string", nullable: true`, so array-valued
+ *    `type` is unwrapped into that form instead of being passed through.
  */
-function toGeminiSchema(schema: unknown): unknown {
+export function toGeminiSchema(schema: unknown): unknown {
   if (Array.isArray(schema)) return schema.map(toGeminiSchema);
   if (schema && typeof schema === "object") {
+    const input = schema as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(input)) {
       if (key === "additionalProperties") continue;
+      if (key === "type") continue; // handled below, once, after the loop
       out[key] = toGeminiSchema(value);
+    }
+    if ("type" in input) {
+      const t = input.type;
+      if (Array.isArray(t)) {
+        const nonNull = t.find(v => v !== "null");
+        if (nonNull !== undefined) out.type = nonNull;
+        if (t.includes("null")) out.nullable = true;
+      } else {
+        out.type = t;
+      }
     }
     return out;
   }

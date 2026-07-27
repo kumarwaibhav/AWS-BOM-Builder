@@ -59,9 +59,12 @@ export const billsRouter = router({
           );
         }
 
-        // 4. LLM enrichment for ambiguous rows only
-        const enrichedFlags = parsed.items.map(i => i.needsEnrichment || !i.serviceCategory);
-        const enriched = await enrichItems(parsed.items);
+        // 4. LLM enrichment for ambiguous rows only. llmSucceededIndices
+        //    reflects which items Gemini actually classified -- not which
+        //    ones were merely *targeted* for enrichment, so a failed Gemini
+        //    call (see enrichment.ts) is correctly reported as unenriched
+        //    rather than silently mislabeled as AI-classified.
+        const { items: enriched, llmSucceededIndices } = await enrichItems(parsed.items);
 
         // 5. Calculate grand total from line items (for reconciliation against
         //    the bill's own printed total). NOTE: an earlier "consolidation"
@@ -89,7 +92,7 @@ export const billsRouter = router({
             quantity: item.quantity === null ? null : String(item.quantity),
             uom: item.uom,
             costUsd: item.costUsd.toFixed(2),
-            llmEnriched: enrichedFlags[idx] ? 1 : 0,
+            llmEnriched: llmSucceededIndices.has(idx) ? 1 : 0,
           }))
         );
 

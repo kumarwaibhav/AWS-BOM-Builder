@@ -26,13 +26,27 @@ interface EnrichmentResult {
 
 const BATCH_SIZE = 40;
 
-export async function enrichItems(items: BomLineItem[]): Promise<BomLineItem[]> {
+export interface EnrichItemsResult {
+  items: BomLineItem[];
+  /**
+   * Indices where Gemini actually returned and applied a classification.
+   * Distinct from "was targeted for enrichment": if the LLM call throws or
+   * its response can't be parsed, the item still ends up defaulted to
+   * "Other" below, but that is a failure being papered over, not a real
+   * classification -- callers (bills.ts) use this set, not the pre-call
+   * target list, to decide what the llmEnriched DB flag should say.
+   */
+  llmSucceededIndices: Set<number>;
+}
+
+export async function enrichItems(items: BomLineItem[]): Promise<EnrichItemsResult> {
   const targets = items
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => item.needsEnrichment || !item.serviceCategory);
-  if (targets.length === 0) return items;
+  if (targets.length === 0) return { items, llmSucceededIndices: new Set() };
 
   const out = items.map(i => ({ ...i }));
+  const llmSucceededIndices = new Set<number>();
 
   for (let b = 0; b < targets.length; b += BATCH_SIZE) {
     const batch = targets.slice(b, b + BATCH_SIZE);
@@ -96,6 +110,7 @@ export async function enrichItems(items: BomLineItem[]): Promise<BomLineItem[]> 
         if (!target) continue;
         if (r.category && VALID_CATEGORIES.includes(r.category as never)) {
           target.serviceCategory = r.category;
+          llmSucceededIndices.add(r.index);
         }
         if (
           r.improvedDescription &&
@@ -112,10 +127,16 @@ export async function enrichItems(items: BomLineItem[]): Promise<BomLineItem[]> 
     }
   }
 
-  // Anything still unclassified falls back to "Other"
+  // Anything still unclassified falls back to "Other" -- this happens both
+  // for items Gemini legitimately had no better answer for AND for items
+  // whose entire batch call failed (network error, bad response, etc). Both
+  // land here so the app always returns usable data, but only the former
+  // should ever be reported to the caller as "true" -- llmSucceededIndices
+  // (populated only on an actually-applied Gemini result, above) is what
+  // distinguishes them.
   for (const item of out) {
     if (!item.serviceCategory) item.serviceCategory = "Other";
     item.needsEnrichment = false;
   }
-  return out;
+  return { items: out, llmSucceededIndices };
 }

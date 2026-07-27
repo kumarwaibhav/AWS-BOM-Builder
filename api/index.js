@@ -623,10 +623,22 @@ function parseAwsBill(text2) {
 function toGeminiSchema(schema) {
   if (Array.isArray(schema)) return schema.map(toGeminiSchema);
   if (schema && typeof schema === "object") {
+    const input = schema;
     const out = {};
-    for (const [key, value] of Object.entries(schema)) {
+    for (const [key, value] of Object.entries(input)) {
       if (key === "additionalProperties") continue;
+      if (key === "type") continue;
       out[key] = toGeminiSchema(value);
+    }
+    if ("type" in input) {
+      const t2 = input.type;
+      if (Array.isArray(t2)) {
+        const nonNull = t2.find((v) => v !== "null");
+        if (nonNull !== void 0) out.type = nonNull;
+        if (t2.includes("null")) out.nullable = true;
+      } else {
+        out.type = t2;
+      }
     }
     return out;
   }
@@ -696,8 +708,9 @@ var VALID_CATEGORIES = [
 var BATCH_SIZE = 40;
 async function enrichItems(items) {
   const targets = items.map((item, index) => ({ item, index })).filter(({ item }) => item.needsEnrichment || !item.serviceCategory);
-  if (targets.length === 0) return items;
+  if (targets.length === 0) return { items, llmSucceededIndices: /* @__PURE__ */ new Set() };
   const out = items.map((i) => ({ ...i }));
+  const llmSucceededIndices = /* @__PURE__ */ new Set();
   for (let b = 0; b < targets.length; b += BATCH_SIZE) {
     const batch = targets.slice(b, b + BATCH_SIZE);
     const payload = batch.map(({ item, index }) => ({
@@ -755,6 +768,7 @@ async function enrichItems(items) {
         if (!target) continue;
         if (r.category && VALID_CATEGORIES.includes(r.category)) {
           target.serviceCategory = r.category;
+          llmSucceededIndices.add(r.index);
         }
         if (r.improvedDescription && r.improvedDescription.length > 3 && // keep raw data where already clear — only replace terse/cryptic text
         target.description.length < 60) {
@@ -770,7 +784,7 @@ async function enrichItems(items) {
     if (!item.serviceCategory) item.serviceCategory = "Other";
     item.needsEnrichment = false;
   }
-  return out;
+  return { items: out, llmSucceededIndices };
 }
 
 // server/excel.ts
@@ -958,8 +972,7 @@ var billsRouter = router({
           "No billing line items found. Please upload a complete AWS 'Bills' PDF export (Billing and Cost Management \u2192 Bills \u2192 Print/Save as PDF)."
         );
       }
-      const enrichedFlags = parsed.items.map((i) => i.needsEnrichment || !i.serviceCategory);
-      const enriched = await enrichItems(parsed.items);
+      const { items: enriched, llmSucceededIndices } = await enrichItems(parsed.items);
       const calculatedTotal = enriched.reduce((sum, item) => sum + item.costUsd, 0);
       await insertBomItems(
         enriched.map((item, idx) => ({
@@ -972,7 +985,7 @@ var billsRouter = router({
           quantity: item.quantity === null ? null : String(item.quantity),
           uom: item.uom,
           costUsd: item.costUsd.toFixed(2),
-          llmEnriched: enrichedFlags[idx] ? 1 : 0
+          llmEnriched: llmSucceededIndices.has(idx) ? 1 : 0
         }))
       );
       const excelBuffer = await generateBomExcel(
