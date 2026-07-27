@@ -98,7 +98,10 @@ var ENV = {
   },
   gemini: {
     apiKey: process.env.GEMINI_API_KEY ?? "",
-    model: process.env.GEMINI_MODEL ?? "gemini-2.0-flash"
+    // gemini-2.0-flash was shut down by Google on 2026-06-01. Confirmed
+    // against Google's own pricing page (2026-07-27) that gemini-3.6-flash is
+    // their current newest stable Flash model and is free-tier eligible.
+    model: process.env.GEMINI_MODEL ?? "gemini-3.6-flash"
   }
 };
 
