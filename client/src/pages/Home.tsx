@@ -7,7 +7,7 @@
  */
 import { useCallback, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { FileText, Loader2, X } from "lucide-react";
+import { FileText, Loader2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import SwissHeader from "@/components/SwissHeader";
@@ -162,11 +162,7 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-4">
-                  <img
-                    src="/brand/aws-to-bom-icon.png"
-                    alt="AWS bill to Excel BOM"
-                    className="w-40 sm:w-48 h-auto rounded-lg shadow-sm"
-                  />
+                  <Upload className="w-10 h-10" strokeWidth={1.25} />
                   <div className="font-semibold text-sm uppercase tracking-widest">
                     Drop AWS bill PDF here
                   </div>
