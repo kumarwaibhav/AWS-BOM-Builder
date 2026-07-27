@@ -1,8 +1,9 @@
 /**
  * Home: upload an AWS billing PDF and convert it to an Excel BOM.
  * Swiss-glass: International Typographic Style grid/type discipline,
- * rendered through red/white frosted-glass panels. No authentication,
- * anonymous access via a client-generated sessionId.
+ * rendered through red/white frosted-glass panels. No user accounts --
+ * anonymous access scoped by a server-issued signed httpOnly session
+ * cookie (see server/_core/sessionCookie.ts), not a client-supplied id.
  */
 import { useCallback, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -13,7 +14,6 @@ import SwissHeader from "@/components/SwissHeader";
 import SwissFooter from "@/components/SwissFooter";
 import ChevronMark from "@/components/ChevronMark";
 import { trpc } from "@/lib/trpc";
-import { useSessionId } from "@/hooks/useSessionId";
 
 const STEPS = [
   { n: "01", t: "Upload", d: "Drop your AWS Bills PDF export (Billing & Cost Management, Bills)." },
@@ -25,7 +25,6 @@ const STEPS = [
 const BOM_COLUMNS = ["S.No.", "Region", "Category", "Service", "Config", "Qty", "UOM", "Cost USD"];
 
 export default function Home() {
-  const sessionId = useSessionId();
   const [, navigate] = useLocation();
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -58,7 +57,7 @@ export default function Home() {
   );
 
   const convert = async () => {
-    if (!file || !sessionId) return;
+    if (!file) return;
     setPhase("processing");
     try {
       const base64 = await new Promise<string>((resolve, reject) => {
@@ -67,7 +66,7 @@ export default function Home() {
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      const res = await upload.mutateAsync({ fileName: file.name, base64, sessionId });
+      const res = await upload.mutateAsync({ fileName: file.name, base64 });
       utils.bills.list.invalidate();
       toast.success(`Extracted ${res.itemCount} line items`);
       navigate(`/bill/${res.billId}`);
@@ -166,7 +165,7 @@ export default function Home() {
             </div>
 
             <Button
-              disabled={!file || phase === "processing" || !sessionId}
+              disabled={!file || phase === "processing"}
               onClick={convert}
               className="mt-6 w-full rounded-none h-14 bg-black text-white hover:bg-primary dark:bg-white dark:text-black dark:hover:bg-primary dark:hover:text-white text-sm font-bold uppercase tracking-[0.2em] transition-colors duration-200 shadow-[0_12px_24px_-8px_rgba(0,0,0,0.35)]">
               {phase === "processing" ? (

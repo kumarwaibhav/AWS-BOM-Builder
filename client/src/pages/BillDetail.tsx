@@ -1,6 +1,7 @@
 /**
  * BillDetail: BOM table preview + Excel/PDF download for one converted bill.
- * No authentication required, anonymous access via sessionId.
+ * No user accounts -- access is scoped by a server-issued signed httpOnly
+ * session cookie (see server/_core/sessionCookie.ts), checked server-side.
  */
 import { useParams, Link } from "wouter";
 import { ArrowLeft, AlertTriangle, CheckCircle2, Download, FileText, Loader2 } from "lucide-react";
@@ -10,7 +11,6 @@ import SwissHeader from "@/components/SwissHeader";
 import SwissFooter from "@/components/SwissFooter";
 import BomTable from "@/components/BomTable";
 import { trpc } from "@/lib/trpc";
-import { useSessionId } from "@/hooks/useSessionId";
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -24,13 +24,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 const usd = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2 });
 
 export default function BillDetail() {
-  const sessionId = useSessionId();
   const params = useParams<{ id: string }>();
   const billId = Number(params.id);
 
   const { data, isLoading, error } = trpc.bills.get.useQuery(
-    { billId, sessionId },
-    { enabled: !!sessionId && Number.isFinite(billId) }
+    { billId },
+    { enabled: Number.isFinite(billId) }
   );
   const downloadExcel = trpc.bills.downloadExcel.useMutation();
   const downloadPdf = trpc.bills.downloadPdf.useMutation();
@@ -38,7 +37,7 @@ export default function BillDetail() {
   const triggerDownload = async (kind: "excel" | "pdf") => {
     try {
       const mut = kind === "excel" ? downloadExcel : downloadPdf;
-      const { url } = await mut.mutateAsync({ billId, sessionId });
+      const { url } = await mut.mutateAsync({ billId });
       const a = document.createElement("a");
       a.href = url;
       a.rel = "noopener";

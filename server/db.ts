@@ -57,6 +57,21 @@ export async function listBillsBySession(sessionId: string) {
   return db.select().from(bills).where(eq(bills.sessionId, sessionId)).orderBy(desc(bills.createdAt));
 }
 
+/**
+ * Used only by the legacy-session-adoption bridge (see
+ * server/_core/sessionCookie.ts): checks whether a pre-existing bill history
+ * exists under an old client-generated sessionId. Returns false (rather than
+ * throwing) when the database is unavailable -- this is an optional
+ * enhancement to preserve old history, not a hard requirement, and must
+ * never block session resolution for brand-new visitors who have none.
+ */
+export async function hasBillsForSession(sessionId: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db.select({ id: bills.id }).from(bills).where(eq(bills.sessionId, sessionId)).limit(1);
+  return rows.length > 0;
+}
+
 export async function insertBomItems(itemsToInsert: InsertBomItem[]): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

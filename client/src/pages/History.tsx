@@ -1,6 +1,7 @@
 /**
  * History: all previously converted bills with re-download from S3.
- * No authentication required, anonymous access via sessionId.
+ * No user accounts -- access is scoped by a server-issued signed httpOnly
+ * session cookie (see server/_core/sessionCookie.ts), checked server-side.
  */
 import { useState } from "react";
 import { Link } from "wouter";
@@ -10,35 +11,30 @@ import { Button } from "@/components/ui/button";
 import SwissHeader from "@/components/SwissHeader";
 import SwissFooter from "@/components/SwissFooter";
 import { trpc } from "@/lib/trpc";
-import { useSessionId } from "@/hooks/useSessionId";
 
 export default function History() {
-  const sessionId = useSessionId();
-  const { data: bills, isLoading } = trpc.bills.list.useQuery(
-    { sessionId },
-    { enabled: !!sessionId }
-  );
+  const { data: bills, isLoading } = trpc.bills.list.useQuery();
   const utils = trpc.useUtils();
   const downloadExcel = trpc.bills.downloadExcel.useMutation();
   const downloadPdfMut = trpc.bills.downloadPdf.useMutation();
   const remove = trpc.bills.remove.useMutation({
     onMutate: async ({ billId }) => {
       await utils.bills.list.cancel();
-      const prev = utils.bills.list.getData({ sessionId });
-      utils.bills.list.setData({ sessionId }, old => old?.filter(b => b.id !== billId));
+      const prev = utils.bills.list.getData();
+      utils.bills.list.setData(undefined, old => old?.filter(b => b.id !== billId));
       return { prev };
     },
     onError: (_e, _v, ctx) => {
-      utils.bills.list.setData({ sessionId }, ctx?.prev);
+      utils.bills.list.setData(undefined, ctx?.prev);
       toast.error("Failed to delete");
     },
-    onSettled: () => utils.bills.list.invalidate({ sessionId }),
+    onSettled: () => utils.bills.list.invalidate(),
   });
 
 
   const download = async (billId: number) => {
     try {
-      const { url } = await downloadExcel.mutateAsync({ billId, sessionId });
+      const { url } = await downloadExcel.mutateAsync({ billId });
       const a = document.createElement("a");
       a.href = url;
       a.rel = "noopener";
@@ -52,7 +48,7 @@ export default function History() {
 
   const downloadPdf = async (billId: number) => {
     try {
-      const { url } = await downloadPdfMut.mutateAsync({ billId, sessionId });
+      const { url } = await downloadPdfMut.mutateAsync({ billId });
       const a = document.createElement("a");
       a.href = url;
       a.rel = "noopener";
@@ -160,7 +156,7 @@ export default function History() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => remove.mutate({ billId: bill.id, sessionId })}
+                      onClick={() => remove.mutate({ billId: bill.id })}
                       className="rounded-none border-black text-xs hover:bg-primary hover:text-white hover:border-primary"
                       aria-label="Delete bill">
                       <Trash2 className="w-3.5 h-3.5" />

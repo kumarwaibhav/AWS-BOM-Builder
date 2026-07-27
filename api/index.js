@@ -157,6 +157,12 @@ async function listBillsBySession(sessionId) {
   if (!db) throw new Error("Database not available");
   return db.select().from(bills).where(eq(bills.sessionId, sessionId)).orderBy(desc(bills.createdAt));
 }
+async function hasBillsForSession(sessionId) {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db.select({ id: bills.id }).from(bills).where(eq(bills.sessionId, sessionId)).limit(1);
+  return rows.length > 0;
+}
 async function insertBomItems(itemsToInsert) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -922,10 +928,9 @@ var billsRouter = router({
   uploadAndParse: publicProcedure.input(
     z2.object({
       fileName: z2.string().min(1).max(500),
-      base64: z2.string().min(100),
-      sessionId: z2.string().min(1).max(128)
+      base64: z2.string().min(100)
     })
-  ).mutation(async ({ input }) => {
+  ).mutation(async ({ input, ctx }) => {
     const buffer = Buffer.from(input.base64, "base64");
     if (buffer.length > MAX_PDF_BYTES) {
       throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "PDF exceeds 25 MB limit" });
@@ -934,10 +939,10 @@ var billsRouter = router({
       throw new TRPCError({ code: "BAD_REQUEST", message: "File is not a valid PDF" });
     }
     const safeName = input.fileName.replace(/[^\w.\-]+/g, "_");
-    const pdfKey = `bills/${input.sessionId}/${nanoid(10)}-${safeName}`;
+    const pdfKey = `bills/${ctx.sessionId}/${nanoid(10)}-${safeName}`;
     await storagePut(pdfKey, buffer, "application/pdf");
     const billId = await createBill({
-      sessionId: input.sessionId,
+      sessionId: ctx.sessionId,
       fileName: input.fileName,
       pdfKey,
       status: "processing"
@@ -986,7 +991,7 @@ var billsRouter = router({
           calculatedTotalUsd: calculatedTotal
         }
       );
-      const excelKey = `bom/${input.sessionId}/${nanoid(10)}-${safeName.replace(/\.pdf$/i, "")}-BOM.xlsx`;
+      const excelKey = `bom/${ctx.sessionId}/${nanoid(10)}-${safeName.replace(/\.pdf$/i, "")}-BOM.xlsx`;
       await storagePut(
         excelKey,
         excelBuffer,
@@ -1009,22 +1014,22 @@ var billsRouter = router({
     }
   }),
   /** Upload history for the current session. */
-  list: publicProcedure.input(z2.object({ sessionId: z2.string().min(1).max(128) })).query(async ({ input }) => {
-    return listBillsBySession(input.sessionId);
+  list: publicProcedure.query(async ({ ctx }) => {
+    return listBillsBySession(ctx.sessionId);
   }),
   /** A single bill + its BOM items (table preview). */
-  get: publicProcedure.input(z2.object({ billId: z2.number().int().positive(), sessionId: z2.string().min(1).max(128) })).query(async ({ input }) => {
+  get: publicProcedure.input(z2.object({ billId: z2.number().int().positive() })).query(async ({ input, ctx }) => {
     const bill = await getBillById(input.billId);
-    if (!bill || bill.sessionId !== input.sessionId) {
+    if (!bill || bill.sessionId !== ctx.sessionId) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
     }
     const items = await getBomItemsByBill(bill.id);
     return { bill, items };
   }),
   /** Signed Supabase Storage URL for the generated Excel BOM (re-download anytime). */
-  downloadExcel: publicProcedure.input(z2.object({ billId: z2.number().int().positive(), sessionId: z2.string().min(1).max(128) })).mutation(async ({ input }) => {
+  downloadExcel: publicProcedure.input(z2.object({ billId: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
     const bill = await getBillById(input.billId);
-    if (!bill || bill.sessionId !== input.sessionId) {
+    if (!bill || bill.sessionId !== ctx.sessionId) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
     }
     if (!bill.excelKey) {
@@ -1034,18 +1039,18 @@ var billsRouter = router({
     return { url, fileName: bill.fileName.replace(/\.pdf$/i, "") + "-BOM.xlsx" };
   }),
   /** Signed Supabase Storage URL for the original uploaded PDF. */
-  downloadPdf: publicProcedure.input(z2.object({ billId: z2.number().int().positive(), sessionId: z2.string().min(1).max(128) })).mutation(async ({ input }) => {
+  downloadPdf: publicProcedure.input(z2.object({ billId: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
     const bill = await getBillById(input.billId);
-    if (!bill || bill.sessionId !== input.sessionId) {
+    if (!bill || bill.sessionId !== ctx.sessionId) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
     }
     const { url } = await storageGet(bill.pdfKey);
     return { url, fileName: bill.fileName };
   }),
   /** Delete a bill and its items from history. */
-  remove: publicProcedure.input(z2.object({ billId: z2.number().int().positive(), sessionId: z2.string().min(1).max(128) })).mutation(async ({ input }) => {
+  remove: publicProcedure.input(z2.object({ billId: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
     const bill = await getBillById(input.billId);
-    if (!bill || bill.sessionId !== input.sessionId) {
+    if (!bill || bill.sessionId !== ctx.sessionId) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
     }
     await deleteBill(bill.id);
@@ -1063,7 +1068,108 @@ var appRouter = router({
 async function createContext(opts) {
   return {
     req: opts.req,
-    res: opts.res
+    res: opts.res,
+    // Populated by createSessionMiddleware in app.ts, which always runs
+    // before this on the /api/trpc path -- never undefined in practice.
+    sessionId: opts.req.sessionId ?? ""
+  };
+}
+
+// server/_core/sessionCookie.ts
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+var SESSION_COOKIE_NAME = "bom_sid";
+var SESSION_MAX_AGE_MS = 1e3 * 60 * 60 * 24 * 180;
+var LEGACY_SESSION_ID_RE = /^session-\d{10,14}-[a-z0-9]{6,12}$/i;
+var RAW_ID_RE = /^[A-Za-z0-9_-]{6,128}$/;
+var cachedSecret = null;
+var warnedMissingSecret = false;
+function getSessionSecret() {
+  if (cachedSecret) return cachedSecret;
+  const configured = process.env.SESSION_SECRET;
+  if (configured) {
+    cachedSecret = configured;
+    return cachedSecret;
+  }
+  if (!warnedMissingSecret) {
+    logger.warn(
+      "SESSION_SECRET is not set -- deriving a fallback signing key from SUPABASE_SERVICE_ROLE_KEY/DATABASE_URL. Sessions still work and stay stable across restarts, but set a dedicated SESSION_SECRET env var for proper secret separation."
+    );
+    warnedMissingSecret = true;
+  }
+  const basis = ENV.supabase.serviceRoleKey || ENV.databaseUrl || "aws-bom-builder-insecure-dev-fallback";
+  cachedSecret = createHash("sha256").update(`aws-bom-session-v1:${basis}`).digest("hex");
+  return cachedSecret;
+}
+function signSessionId(id) {
+  const sig = createHmac("sha256", getSessionSecret()).update(id).digest("base64url");
+  return `${id}.${sig}`;
+}
+function verifySignedSessionId(token) {
+  if (!token) return null;
+  const idx = token.lastIndexOf(".");
+  if (idx <= 0 || idx === token.length - 1) return null;
+  const id = token.slice(0, idx);
+  const sig = token.slice(idx + 1);
+  if (!RAW_ID_RE.test(id)) return null;
+  const expected = createHmac("sha256", getSessionSecret()).update(id).digest("base64url");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return null;
+  if (!timingSafeEqual(a, b)) return null;
+  return id;
+}
+function parseCookieHeader(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const eq2 = part.indexOf("=");
+    if (eq2 === -1) continue;
+    const key = part.slice(0, eq2).trim();
+    if (!key) continue;
+    const value = part.slice(eq2 + 1).trim();
+    try {
+      out[key] = decodeURIComponent(value);
+    } catch {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+async function resolveIncomingSessionId(params) {
+  const cookies = parseCookieHeader(params.cookieHeader);
+  const fromCookie = verifySignedSessionId(cookies[SESSION_COOKIE_NAME]);
+  if (fromCookie) return fromCookie;
+  if (params.legacyHeader && LEGACY_SESSION_ID_RE.test(params.legacyHeader)) {
+    const exists = await params.hasLegacyHistory(params.legacyHeader).catch(() => false);
+    if (exists) return params.legacyHeader;
+  }
+  return randomBytes(32).toString("base64url");
+}
+function setSessionCookie(res, sessionId) {
+  res.cookie(SESSION_COOKIE_NAME, signSessionId(sessionId), {
+    httpOnly: true,
+    secure: ENV.isProduction,
+    sameSite: "lax",
+    path: "/",
+    maxAge: SESSION_MAX_AGE_MS
+  });
+}
+function firstHeaderValue(v) {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && v.length > 0) return v[0];
+  return null;
+}
+function createSessionMiddleware(deps) {
+  return function sessionMiddleware(req, res, next) {
+    resolveIncomingSessionId({
+      cookieHeader: req.headers.cookie,
+      legacyHeader: firstHeaderValue(req.headers["x-legacy-session-id"]),
+      hasLegacyHistory: deps.hasLegacyHistory
+    }).then((sessionId) => {
+      req.sessionId = sessionId;
+      setSessionCookie(res, sessionId);
+      next();
+    }).catch(next);
   };
 }
 
@@ -1082,6 +1188,7 @@ function createApiApp() {
     message: { error: "Too many requests, please try again later." }
   });
   app.use("/api/trpc", apiLimiter);
+  app.use("/api/trpc", createSessionMiddleware({ hasLegacyHistory: hasBillsForSession }));
   app.use(
     "/api/trpc",
     createExpressMiddleware({

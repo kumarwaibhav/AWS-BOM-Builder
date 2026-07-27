@@ -1,7 +1,9 @@
 /**
  * Bills feature router: upload & parse AWS billing PDFs, list history,
  * fetch BOM items, and produce downloadable Excel files — all Supabase Storage-backed.
- * No authentication required — anonymous access via sessionId.
+ * No user accounts, but no longer "trust whatever sessionId the client sends"
+ * either: ctx.sessionId comes from a server-verified signed cookie (see
+ * server/_core/sessionCookie.ts), never from request input.
  */
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
@@ -23,10 +25,9 @@ export const billsRouter = router({
       z.object({
         fileName: z.string().min(1).max(500),
         base64: z.string().min(100),
-        sessionId: z.string().min(1).max(128),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const buffer = Buffer.from(input.base64, "base64");
       if (buffer.length > MAX_PDF_BYTES) {
         throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "PDF exceeds 25 MB limit" });
@@ -37,12 +38,12 @@ export const billsRouter = router({
 
       // 1. store the original PDF in Supabase Storage
       const safeName = input.fileName.replace(/[^\w.\-]+/g, "_");
-      const pdfKey = `bills/${input.sessionId}/${nanoid(10)}-${safeName}`;
+      const pdfKey = `bills/${ctx.sessionId}/${nanoid(10)}-${safeName}`;
       await storagePut(pdfKey, buffer, "application/pdf");
 
       // 2. create the bill record
       const billId = await db.createBill({
-        sessionId: input.sessionId,
+        sessionId: ctx.sessionId,
         fileName: input.fileName,
         pdfKey,
         status: "processing",
@@ -112,7 +113,7 @@ export const billsRouter = router({
             calculatedTotalUsd: calculatedTotal,
           }
         );
-        const excelKey = `bom/${input.sessionId}/${nanoid(10)}-${safeName.replace(/\.pdf$/i, "")}-BOM.xlsx`;
+        const excelKey = `bom/${ctx.sessionId}/${nanoid(10)}-${safeName.replace(/\.pdf$/i, "")}-BOM.xlsx`;
         await storagePut(
           excelKey,
           excelBuffer,
@@ -139,18 +140,16 @@ export const billsRouter = router({
     }),
 
   /** Upload history for the current session. */
-  list: publicProcedure
-    .input(z.object({ sessionId: z.string().min(1).max(128) }))
-    .query(async ({ input }) => {
-      return db.listBillsBySession(input.sessionId);
-    }),
+  list: publicProcedure.query(async ({ ctx }) => {
+    return db.listBillsBySession(ctx.sessionId);
+  }),
 
   /** A single bill + its BOM items (table preview). */
   get: publicProcedure
-    .input(z.object({ billId: z.number().int().positive(), sessionId: z.string().min(1).max(128) }))
-    .query(async ({ input }) => {
+    .input(z.object({ billId: z.number().int().positive() }))
+    .query(async ({ input, ctx }) => {
       const bill = await db.getBillById(input.billId);
-      if (!bill || bill.sessionId !== input.sessionId) {
+      if (!bill || bill.sessionId !== ctx.sessionId) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
       }
       const items = await db.getBomItemsByBill(bill.id);
@@ -159,10 +158,10 @@ export const billsRouter = router({
 
   /** Signed Supabase Storage URL for the generated Excel BOM (re-download anytime). */
   downloadExcel: publicProcedure
-    .input(z.object({ billId: z.number().int().positive(), sessionId: z.string().min(1).max(128) }))
-    .mutation(async ({ input }) => {
+    .input(z.object({ billId: z.number().int().positive() }))
+    .mutation(async ({ input, ctx }) => {
       const bill = await db.getBillById(input.billId);
-      if (!bill || bill.sessionId !== input.sessionId) {
+      if (!bill || bill.sessionId !== ctx.sessionId) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
       }
       if (!bill.excelKey) {
@@ -174,10 +173,10 @@ export const billsRouter = router({
 
   /** Signed Supabase Storage URL for the original uploaded PDF. */
   downloadPdf: publicProcedure
-    .input(z.object({ billId: z.number().int().positive(), sessionId: z.string().min(1).max(128) }))
-    .mutation(async ({ input }) => {
+    .input(z.object({ billId: z.number().int().positive() }))
+    .mutation(async ({ input, ctx }) => {
       const bill = await db.getBillById(input.billId);
-      if (!bill || bill.sessionId !== input.sessionId) {
+      if (!bill || bill.sessionId !== ctx.sessionId) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
       }
       const { url } = await storageGet(bill.pdfKey);
@@ -186,10 +185,10 @@ export const billsRouter = router({
 
   /** Delete a bill and its items from history. */
   remove: publicProcedure
-    .input(z.object({ billId: z.number().int().positive(), sessionId: z.string().min(1).max(128) }))
-    .mutation(async ({ input }) => {
+    .input(z.object({ billId: z.number().int().positive() }))
+    .mutation(async ({ input, ctx }) => {
       const bill = await db.getBillById(input.billId);
-      if (!bill || bill.sessionId !== input.sessionId) {
+      if (!bill || bill.sessionId !== ctx.sessionId) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
       }
       await db.deleteBill(bill.id);

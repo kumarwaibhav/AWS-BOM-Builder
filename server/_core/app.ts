@@ -12,7 +12,9 @@ import rateLimit from "express-rate-limit";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { createSessionMiddleware } from "./sessionCookie";
 import { logger } from "./logger";
+import * as db from "../db";
 
 export function createApiApp(): Express {
   const app = express();
@@ -45,6 +47,11 @@ export function createApiApp(): Express {
     message: { error: "Too many requests, please try again later." },
   });
   app.use("/api/trpc", apiLimiter);
+
+  // Resolves/issues the signed httpOnly session cookie (see sessionCookie.ts)
+  // before the tRPC handler runs, so every procedure's ctx.sessionId is
+  // already server-verified -- no procedure trusts a client-supplied id.
+  app.use("/api/trpc", createSessionMiddleware({ hasLegacyHistory: db.hasBillsForSession }));
 
   app.use(
     "/api/trpc",
