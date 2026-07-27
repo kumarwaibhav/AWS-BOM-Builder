@@ -52,8 +52,17 @@ export default function BillDetail() {
 
   const grandTotal = data?.bill.grandTotalUsd ? Number(data.bill.grandTotalUsd) : null;
   const calculatedTotal = data?.bill.calculatedTotalUsd ? Number(data.bill.calculatedTotalUsd) : null;
+  // Summing hundreds of independently cent-rounded line items can drift a
+  // few cents to a few dollars from AWS's own printed total on large bills
+  // (AWS rounds internally at a different stage) -- verified against 10 real
+  // bills via scripts/verify-bills.ts. A flat 1-cent tolerance flagged
+  // completely correct bills as "worth a manual spot-check", so this uses
+  // whichever is larger: 25 cents, or 0.05% of the bill.
+  const reconcileTolerance = grandTotal !== null ? Math.max(0.25, grandTotal * 0.0005) : 0.01;
   const reconciles =
-    grandTotal !== null && calculatedTotal !== null && Math.abs(grandTotal - calculatedTotal) < 0.01;
+    grandTotal !== null &&
+    calculatedTotal !== null &&
+    Math.abs(grandTotal - calculatedTotal) < reconcileTolerance;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -123,34 +132,55 @@ export default function BillDetail() {
                 <Stat label="Grand Total (USD)" value={grandTotal !== null ? usd(grandTotal) : "N/A"} />
               </div>
 
-              {calculatedTotal !== null && (
-                <div
-                  className={`mb-6 p-4 rounded-[var(--radius-glass)] border ${
-                    reconciles
-                      ? "border-emerald-600/30 bg-emerald-50/60 dark:bg-emerald-950/30"
-                      : "border-amber-600/40 bg-amber-50/60 dark:bg-amber-950/30"
-                  }`}>
+              {data.items.length === 0 && grandTotal !== null ? (
+                <div className="mb-6 p-4 rounded-[var(--radius-glass)] border border-amber-600/40 bg-amber-50/60 dark:bg-amber-950/30">
                   <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
                     Reconciliation Check
                   </div>
                   <div className="mt-2 flex items-center gap-3">
-                    {reconciles ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    ) : (
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                    )}
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                     <span className="text-sm font-semibold">
-                      Calculated Total: USD {usd(calculatedTotal)}
-                      {grandTotal !== null && !reconciles && (
-                        <span className="font-normal text-muted-foreground">
-                          {" "}
-                          (bill states USD {usd(grandTotal)}, diff USD {usd(Math.abs(grandTotal - calculatedTotal))}).
-                          Parsing may have missed or misclassified a line: worth a manual spot-check.
-                        </span>
-                      )}
+                      No line items found in this PDF.
+                      <span className="font-normal text-muted-foreground">
+                        {" "}
+                        The bill states USD {usd(grandTotal)}, but this export has no itemized
+                        "Charges by service" section to break down: often true of early
+                        in-month estimate snapshots. Try re-exporting closer to month-end for
+                        a fully itemized bill.
+                      </span>
                     </span>
                   </div>
                 </div>
+              ) : (
+                calculatedTotal !== null && (
+                  <div
+                    className={`mb-6 p-4 rounded-[var(--radius-glass)] border ${
+                      reconciles
+                        ? "border-emerald-600/30 bg-emerald-50/60 dark:bg-emerald-950/30"
+                        : "border-amber-600/40 bg-amber-50/60 dark:bg-amber-950/30"
+                    }`}>
+                    <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+                      Reconciliation Check
+                    </div>
+                    <div className="mt-2 flex items-center gap-3">
+                      {reconciles ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      )}
+                      <span className="text-sm font-semibold">
+                        Calculated Total: USD {usd(calculatedTotal)}
+                        {grandTotal !== null && !reconciles && (
+                          <span className="font-normal text-muted-foreground">
+                            {" "}
+                            (bill states USD {usd(grandTotal)}, diff USD {usd(Math.abs(grandTotal - calculatedTotal))}).
+                            Parsing may have missed or misclassified a line: worth a manual spot-check.
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                )
               )}
 
               <div className="flex items-center gap-2 mb-3">

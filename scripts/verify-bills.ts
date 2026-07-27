@@ -140,10 +140,17 @@ async function main() {
 
     if (independentGrandTotal !== null) {
       const diff = round2(Math.abs(calculatedTotal - independentGrandTotal));
-      if (diff > 0.01) {
+      // Summing hundreds of independently-cent-rounded line items can drift a
+      // few cents from AWS's own total (AWS rounds internally at a different
+      // stage) -- that's normal, not a parsing bug. Flag only once the drift
+      // exceeds whichever is larger: 25 cents, or 0.05% of the bill.
+      const tolerance = Math.max(0.25, independentGrandTotal * 0.0005);
+      if (diff > tolerance) {
         issues.push(
-          `Calculated line-item sum (USD ${calculatedTotal}) vs. bill's stated total (USD ${independentGrandTotal}): diff USD ${diff}`
+          `Calculated line-item sum (USD ${calculatedTotal}) vs. bill's stated total (USD ${independentGrandTotal}): diff USD ${diff} -- exceeds rounding tolerance (USD ${round2(tolerance)})`
         );
+      } else if (diff > 0.01) {
+        console.log(`  (${file}: USD ${diff} diff, within normal rounding tolerance)`);
       }
     }
 

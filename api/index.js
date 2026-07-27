@@ -403,19 +403,29 @@ var UOM_WHITELIST_RE = new RegExp(
     // AWS Config kerned artifacts (e.g. "APS3-Config urationItemRecorded")
     "APS\\d+-?Config ?urationItemRecorded",
     "Config ?urationItemRecorded",
-    "Config ?RuleEvaluations"
+    "Config ?RuleEvaluations",
+    // Confirmed via real-bill verification (scripts/verify-bills.ts):
+    // these were silently dropping genuine leaf charges because the unit
+    // wasn't recognized, forcing the line to fall through to the
+    // "no quantity found" default of isGroupLine: true.
+    "Accelerator-Hours?",
+    "Dollars?",
+    "Activit(?:y|ies)",
+    "Faces?-Mo"
   ].join("|") + ")$",
   "i"
 );
+var UOM_COMPOUND_SUFFIX_RE = /-(Hours?|Hrs|Mo|Month|Sec|Seconds?)$/i;
 var RATE_PREFIX_RE = /^(\$|USD ?\d|Rs\.? ?\d|€|£)/;
 var CREDIT_LINE_RE = /(covered by|free of charge|free tier|under .*free|savings? plans?|credit applied|applied credit|aws credits?\b|promotional credits?|\bfree\b|reserved instance applied|per month .*free|instance usage under|usage under .*plan)/i;
 function isPlausibleUom(phrase) {
   const p = phrase.trim();
   if (!p || p.length > 40) return false;
-  if (UOM_WHITELIST_RE.test(p)) return true;
+  if (UOM_WHITELIST_RE.test(p) || UOM_COMPOUND_SUFFIX_RE.test(p)) return true;
   const words = p.split(/[ \u00a0]+/);
   if (words.length >= 2 && words.length <= 4) {
-    return UOM_WHITELIST_RE.test(words[words.length - 1]);
+    const last = words[words.length - 1];
+    return UOM_WHITELIST_RE.test(last) || UOM_COMPOUND_SUFFIX_RE.test(last);
   }
   return false;
 }
@@ -453,6 +463,10 @@ function tokenizeLine(line) {
     }
   }
   const restTrim = rest.trim();
+  const BARE_SAVINGS_PLAN_HEADER_RE = /^(?:[A-Za-z0-9]+\s+){0,3}Savings Plans$|^Savings Plans for AWS [A-Za-z]+(?:\s+[A-Za-z]+)? usage$/i;
+  if (BARE_SAVINGS_PLAN_HEADER_RE.test(restTrim)) {
+    return { description: restTrim, quantity: null, uom: null, costUsd, isGroupLine: true };
+  }
   if (RATE_PREFIX_RE.test(restTrim) || CREDIT_LINE_RE.test(restTrim)) {
     return { description: restTrim, quantity: null, uom: null, costUsd, isGroupLine: false };
   }
@@ -476,7 +490,7 @@ function parseAwsBill(text2) {
     }
     if (!accountId && /^\d{12}$/.test(l)) accountId = l;
     if (grandTotalUsd === null) {
-      const gt = l.match(/Estimated grand total:\s*USD\s?([\d,.]+)/i);
+      const gt = l.match(/(?:Estimated\s+)?grand total:\s*USD\s?([\d,.]+)/i);
       if (gt) grandTotalUsd = parseFloat(gt[1].replace(/,/g, ""));
     }
   }
