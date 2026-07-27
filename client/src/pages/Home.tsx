@@ -40,8 +40,15 @@ export default function Home() {
       toast.error("Please select a PDF file");
       return;
     }
-    if (f.size > 25 * 1024 * 1024) {
-      toast.error("PDF exceeds the 25 MB limit");
+    // Kept in sync with server/routers/bills.ts's MAX_PDF_BYTES: the real
+    // ceiling is a Vercel platform limit (4.5 MB per request body), not a
+    // product choice, so this can't simply be raised without moving the
+    // upload off the serverless function's request body entirely.
+    if (f.size > 3 * 1024 * 1024) {
+      toast.error(
+        "This PDF is too large to upload (limit: ~3 MB, a hosting platform constraint). " +
+          "Try exporting a shorter billing period, or split a large consolidated bill into per-account PDFs."
+      );
       return;
     }
     setFile(f);
@@ -159,7 +166,7 @@ export default function Home() {
                   <div className="font-semibold text-sm uppercase tracking-widest">
                     Drop AWS bill PDF here
                   </div>
-                  <div className="text-xs text-muted-foreground">or click to browse, max 25 MB</div>
+                  <div className="text-xs text-muted-foreground">or click to browse, max 3 MB</div>
                 </div>
               )}
             </div>

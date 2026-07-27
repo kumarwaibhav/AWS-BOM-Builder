@@ -112,7 +112,7 @@ pnpm test --coverage   # with coverage
 
 ## Limitations
 
-- Max PDF size: 25 MB
+- Max PDF size: ~3 MB (Vercel serverless function request-body limit -- see DEPLOYMENT.md)
 - Max line items per bill: 10,000
 - Supports the AWS **Bills** PDF export only (Billing and Cost Management → Bills → Print/Save as PDF) — not Cost Explorer exports
 

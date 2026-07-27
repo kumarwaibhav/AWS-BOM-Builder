@@ -100,7 +100,7 @@ Already wired into the server (`server/_core/app.ts`), not something you need to
 
 **Migrations fail with a connection error** — `drizzle-kit migrate` needs `DIRECT_URL`, not the pooled `DATABASE_URL`; the transaction-mode pooler doesn't support the session features DDL requires.
 
-**"PDF upload fails with 413"** — the app accepts up to 25 MB PDFs (checked in `server/routers/bills.ts`) with a 50 MB body-parser limit to cover base64 inflation. If your host has its own smaller request-size limit (some serverless platforms cap around 4.5 MB), you'll need a direct-to-storage upload flow instead of base64-over-tRPC — not implemented here yet.
+**"PDF upload fails with 413"** — Vercel Functions hard-cap the request body at 4.5 MB (confirmed against Vercel'''s own docs, not configurable). The app enforces a ~3 MB raw-PDF limit (`server/routers/bills.ts`, `MAX_PDF_BYTES`) to stay safely under that once base64 inflation (~4/3x) and JSON overhead are accounted for -- this was previously misconfigured at 25 MB, a limit Vercel would already silently reject before this code ever saw the request, producing a raw unstyled `FUNCTION_PAYLOAD_TOO_LARGE` error instead of the app'''s own clear message. If you need to accept larger bills, the real fix is a direct-to-storage upload flow (client uploads straight to Supabase Storage via a signed URL, server only receives the storage key) -- not implemented here yet.
 
 **AI enrichment silently not running** — expected if `GEMINI_API_KEY` is unset; check server logs for "AI enrichment is disabled" only if you expected it to run.
 

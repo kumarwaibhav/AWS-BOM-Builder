@@ -32,10 +32,14 @@ export function createApiApp(): Express {
   // layer in production instead of fighting the dev server.
   app.use(helmet({ contentSecurityPolicy: false }));
 
-  // Configure body parser with larger size limit for file uploads (base64
-  // inflates a 25MB PDF to ~34MB).
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // Body parser size limit. This is a backstop, not the real ceiling: Vercel
+  // Functions hard-cap the whole request body at 4.5 MB (platform limit, not
+  // configurable), which rejects oversized requests before Express even sees
+  // them. 6mb here just keeps local/non-Vercel deployments from accepting
+  // something Vercel never would -- MAX_PDF_BYTES in bills.ts (~3 MB raw,
+  // ~4 MB base64-encoded) is what actually governs in production.
+  app.use(express.json({ limit: "6mb" }));
+  app.use(express.urlencoded({ limit: "6mb", extended: true }));
 
   // Rate limit the API surface: uploads are the expensive path (PDF parse +
   // LLM enrichment + S3 + Excel generation), so keep this conservative.

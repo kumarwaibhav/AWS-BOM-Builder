@@ -939,7 +939,7 @@ async function storageGet(relKey) {
 }
 
 // server/routers/bills.ts
-var MAX_PDF_BYTES = 25 * 1024 * 1024;
+var MAX_PDF_BYTES = 3 * 1024 * 1024;
 var billsRouter = router({
   /** Upload a PDF (base64), parse it, enrich, persist everything. */
   uploadAndParse: publicProcedure.input(
@@ -950,7 +950,10 @@ var billsRouter = router({
   ).mutation(async ({ input, ctx }) => {
     const buffer = Buffer.from(input.base64, "base64");
     if (buffer.length > MAX_PDF_BYTES) {
-      throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "PDF exceeds 25 MB limit" });
+      throw new TRPCError({
+        code: "PAYLOAD_TOO_LARGE",
+        message: "This PDF is too large to upload (limit: ~3 MB, a hosting platform constraint). Try exporting a shorter billing period, or split a large consolidated bill into per-account PDFs."
+      });
     }
     if (!buffer.subarray(0, 5).toString("latin1").startsWith("%PDF")) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "File is not a valid PDF" });
@@ -1194,8 +1197,8 @@ function createApiApp() {
   const app = express();
   app.set("trust proxy", 1);
   app.use(helmet({ contentSecurityPolicy: false }));
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use(express.json({ limit: "6mb" }));
+  app.use(express.urlencoded({ limit: "6mb", extended: true }));
   const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1e3,
     limit: 100,

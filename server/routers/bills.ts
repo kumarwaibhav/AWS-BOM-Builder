@@ -16,7 +16,19 @@ import { enrichItems } from "../enrichment";
 import { generateBomExcel } from "../excel";
 import { storageGet, storagePut } from "../storage";
 
-const MAX_PDF_BYTES = 25 * 1024 * 1024; // 25 MB
+// Vercel Functions hard-cap the request body at 4.5 MB (platform limit,
+// not configurable -- confirmed against Vercel's own docs, 2026-07-27).
+// The PDF travels here base64-encoded inside a JSON body, which inflates
+// its size by ~4/3, so the real usable ceiling is well under 4.5 MB of
+// raw PDF bytes -- NOT the 25 MB this constant used to claim. That old
+// number was never reachable in production: anything over ~3.3 MB raw
+// was already being rejected by Vercel itself with a generic, unstyled
+// "FUNCTION_PAYLOAD_TOO_LARGE" error before this code ever ran (found via
+// direct testing against the live deployment). 3 MB raw leaves headroom
+// for base64 inflation + JSON/HTTP overhead while staying safely under
+// the hard 4.5 MB ceiling, and produces the app's own clear error
+// instead of the platform's opaque one for anything larger.
+const MAX_PDF_BYTES = 3 * 1024 * 1024; // 3 MB raw (see comment above)
 
 export const billsRouter = router({
   /** Upload a PDF (base64), parse it, enrich, persist everything. */
@@ -30,7 +42,12 @@ export const billsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const buffer = Buffer.from(input.base64, "base64");
       if (buffer.length > MAX_PDF_BYTES) {
-        throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "PDF exceeds 25 MB limit" });
+        throw new TRPCError({
+          code: "PAYLOAD_TOO_LARGE",
+          message:
+            "This PDF is too large to upload (limit: ~3 MB, a hosting platform constraint). " +
+            "Try exporting a shorter billing period, or split a large consolidated bill into per-account PDFs.",
+        });
       }
       if (!buffer.subarray(0, 5).toString("latin1").startsWith("%PDF")) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "File is not a valid PDF" });
