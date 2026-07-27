@@ -59,7 +59,7 @@ function toGeminiSchema(schema: unknown): unknown {
 
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   if (!ENV.gemini.apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured — AI enrichment is disabled");
+    throw new Error("GEMINI_API_KEY is not configured: AI enrichment is disabled");
   }
 
   const systemInstruction = params.messages

@@ -1,6 +1,6 @@
 /**
- * History — all previously converted bills with re-download from S3.
- * No authentication required — anonymous access via sessionId.
+ * History: all previously converted bills with re-download from S3.
+ * No authentication required, anonymous access via sessionId.
  */
 import { useState } from "react";
 import { Link } from "wouter";
@@ -8,6 +8,8 @@ import { Download, FileText, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import SwissHeader from "@/components/SwissHeader";
+import SwissFooter from "@/components/SwissFooter";
+import ChevronMark from "@/components/ChevronMark";
 import { trpc } from "@/lib/trpc";
 import { useSessionId } from "@/hooks/useSessionId";
 
@@ -64,112 +66,115 @@ export default function History() {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen flex flex-col">
       <div className="app-backdrop" aria-hidden="true" />
       <SwissHeader />
-      <main className="mx-auto max-w-7xl px-4 sm:px-8 py-10">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="w-3 h-3 bg-primary" />
-          <span className="text-xs font-mono uppercase tracking-[0.25em] text-muted-foreground">
-            Archive
-          </span>
-        </div>
-        <h1 className="text-3xl sm:text-5xl font-black tracking-tighter uppercase mb-10">
-          Upload History
-        </h1>
+      <main className="flex-1">
+        <div className="mx-auto max-w-7xl px-4 sm:px-8 py-10">
+          <div className="flex items-center gap-2 mb-3">
+            <ChevronMark size={13} />
+            <span className="text-xs font-mono uppercase tracking-[0.25em] text-muted-foreground">
+              Archive
+            </span>
+          </div>
+          <h1 className="text-3xl sm:text-5xl font-black tracking-tighter uppercase mb-10">
+            Upload History
+          </h1>
 
-        {isLoading ? (
-          <div className="flex items-center gap-3 py-24 justify-center text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span className="text-sm font-mono">Loading history…</span>
-          </div>
-        ) : !bills || bills.length === 0 ? (
-          <div className="glass p-16 text-center">
-            <FileText className="w-10 h-10 mx-auto mb-4" strokeWidth={1.25} />
-            <p className="text-sm text-muted-foreground mb-6">
-              No bills converted yet. Upload your first AWS bill PDF.
-            </p>
-            <Link href="/">
-              <Button className="rounded-none bg-black text-white hover:bg-primary uppercase tracking-widest text-xs font-bold">
-                Convert a bill
-              </Button>
-            </Link>
-          </div>
-        ) : (
-          <div className="glass divide-y divide-[var(--glass-border)] overflow-hidden">
-            {bills.map(bill => (
-              <div
-                key={bill.id}
-                className="grid grid-cols-1 md:grid-cols-12 gap-4 p-5 items-center hover:bg-white/40 transition-colors">
-                <div className="md:col-span-5 min-w-0">
-                  {bill.status === "completed" ? (
-                    <Link
-                      href={`/bill/${bill.id}`}
-                      className="font-bold text-sm hover:text-primary break-all">
-                      {bill.fileName}
-                    </Link>
-                  ) : (
-                    <span className="font-bold text-sm break-all">{bill.fileName}</span>
-                  )}
-                  <div className="text-xs font-mono text-muted-foreground mt-1">
-                    {new Date(bill.createdAt).toLocaleString()} · {bill.billingPeriod || "—"}
+          {isLoading ? (
+            <div className="flex items-center gap-3 py-24 justify-center text-muted-foreground">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span className="text-sm font-mono">Loading history...</span>
+            </div>
+          ) : !bills || bills.length === 0 ? (
+            <div className="glass p-16 text-center">
+              <FileText className="w-10 h-10 mx-auto mb-4" strokeWidth={1.25} />
+              <p className="text-sm text-muted-foreground mb-6">
+                No bills converted yet. Upload your first AWS bill PDF.
+              </p>
+              <Link href="/">
+                <Button className="rounded-none bg-black text-white hover:bg-primary dark:bg-white dark:text-black uppercase tracking-widest text-xs font-bold">
+                  Convert a bill
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="glass divide-y divide-[var(--glass-border)] overflow-hidden">
+              {bills.map(bill => (
+                <div
+                  key={bill.id}
+                  className="grid grid-cols-1 md:grid-cols-12 gap-4 p-5 items-center hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+                  <div className="md:col-span-5 min-w-0">
+                    {bill.status === "completed" ? (
+                      <Link
+                        href={`/bill/${bill.id}`}
+                        className="font-bold text-sm hover:text-primary break-all">
+                        {bill.fileName}
+                      </Link>
+                    ) : (
+                      <span className="font-bold text-sm break-all">{bill.fileName}</span>
+                    )}
+                    <div className="text-xs font-mono text-muted-foreground mt-1">
+                      {new Date(bill.createdAt).toLocaleString()} · {bill.billingPeriod || "N/A"}
+                    </div>
+                    {bill.status === "failed" && (
+                      <div className="text-xs text-primary mt-1">{bill.errorMessage}</div>
+                    )}
                   </div>
-                  {bill.status === "failed" && (
-                    <div className="text-xs text-primary mt-1">{bill.errorMessage}</div>
-                  )}
-                </div>
-                <div className="md:col-span-2 text-xs font-mono">
-                  {bill.status === "completed" ? (
-                    <span>{bill.itemCount} items</span>
-                  ) : (
-                    <span className="uppercase tracking-widest text-primary font-bold">{bill.status}</span>
-                  )}
-                </div>
-                <div className="md:col-span-2 text-sm font-mono">
-                  {bill.grandTotalUsd
-                    ? `USD ${Number(bill.grandTotalUsd).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
-                    : "—"}
-                </div>
-                <div className="md:col-span-3 flex gap-2 md:justify-end">
-                  {bill.status === "completed" && (
-                    <>
-                      <Link href={`/bill/${bill.id}`}>
+                  <div className="md:col-span-2 text-xs font-mono">
+                    {bill.status === "completed" ? (
+                      <span>{bill.itemCount} items</span>
+                    ) : (
+                      <span className="uppercase tracking-widest text-primary font-bold">{bill.status}</span>
+                    )}
+                  </div>
+                  <div className="md:col-span-2 text-sm font-mono">
+                    {bill.grandTotalUsd
+                      ? `USD ${Number(bill.grandTotalUsd).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+                      : "N/A"}
+                  </div>
+                  <div className="md:col-span-3 flex gap-2 md:justify-end">
+                    {bill.status === "completed" && (
+                      <>
+                        <Link href={`/bill/${bill.id}`}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-none border-black text-xs uppercase tracking-widest font-semibold">
+                            View
+                          </Button>
+                        </Link>
+                        <Button
+                          size="sm"
+                          onClick={() => download(bill.id)}
+                          className="rounded-none bg-primary text-white hover:bg-black text-xs uppercase tracking-widest font-semibold">
+                          <Download className="w-3.5 h-3.5" /> Excel
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="rounded-none border-black text-xs uppercase tracking-widest font-semibold">
-                          View
+                          onClick={() => downloadPdf(bill.id)}
+                          className="rounded-none border-black text-xs uppercase tracking-widest font-semibold hover:bg-black hover:text-white">
+                          PDF
                         </Button>
-                      </Link>
-                      <Button
-                        size="sm"
-                        onClick={() => download(bill.id)}
-                        className="rounded-none bg-primary text-white hover:bg-black text-xs uppercase tracking-widest font-semibold">
-                        <Download className="w-3.5 h-3.5" /> Excel
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => downloadPdf(bill.id)}
-                        className="rounded-none border-black text-xs uppercase tracking-widest font-semibold hover:bg-black hover:text-white">
-                        PDF
-                      </Button>
-                    </>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => remove.mutate({ billId: bill.id, sessionId })}
-                    className="rounded-none border-black text-xs hover:bg-primary hover:text-white hover:border-primary"
-                    aria-label="Delete bill">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
+                      </>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => remove.mutate({ billId: bill.id, sessionId })}
+                      className="rounded-none border-black text-xs hover:bg-primary hover:text-white hover:border-primary"
+                      aria-label="Delete bill">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </main>
+      <SwissFooter />
     </div>
   );
 }

@@ -110,9 +110,9 @@ export async function generateBomExcel(
   ];
   info.getRow(1).font = { bold: true };
   info.addRow({ f: "Source File", v: meta.fileName });
-  info.addRow({ f: "Billing Period", v: meta.billingPeriod ?? "—" });
-  info.addRow({ f: "Account ID", v: meta.accountId ?? "—" });
-  info.addRow({ f: "Estimated Grand Total (USD, incl. tax)", v: meta.grandTotalUsd ?? "—" });
+  info.addRow({ f: "Billing Period", v: meta.billingPeriod ?? "N/A" });
+  info.addRow({ f: "Account ID", v: meta.accountId ?? "N/A" });
+  info.addRow({ f: "Estimated Grand Total (USD, incl. tax)", v: meta.grandTotalUsd ?? "N/A" });
   info.addRow({ f: "Line Items", v: rows.length });
   info.addRow({ f: "Pre-tax Line-Item Total (USD)", v: Math.round(totalCost * 100) / 100 });
   info.addRow({ f: "Generated", v: new Date().toISOString() });

@@ -611,7 +611,7 @@ function toGeminiSchema(schema) {
 }
 async function invokeLLM(params) {
   if (!ENV.gemini.apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured \u2014 AI enrichment is disabled");
+    throw new Error("GEMINI_API_KEY is not configured: AI enrichment is disabled");
   }
   const systemInstruction = params.messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
   const contents = params.messages.filter((m) => m.role !== "system").map((m) => ({
@@ -829,9 +829,9 @@ async function generateBomExcel(rows, meta) {
   ];
   info.getRow(1).font = { bold: true };
   info.addRow({ f: "Source File", v: meta.fileName });
-  info.addRow({ f: "Billing Period", v: meta.billingPeriod ?? "\u2014" });
-  info.addRow({ f: "Account ID", v: meta.accountId ?? "\u2014" });
-  info.addRow({ f: "Estimated Grand Total (USD, incl. tax)", v: meta.grandTotalUsd ?? "\u2014" });
+  info.addRow({ f: "Billing Period", v: meta.billingPeriod ?? "N/A" });
+  info.addRow({ f: "Account ID", v: meta.accountId ?? "N/A" });
+  info.addRow({ f: "Estimated Grand Total (USD, incl. tax)", v: meta.grandTotalUsd ?? "N/A" });
   info.addRow({ f: "Line Items", v: rows.length });
   info.addRow({ f: "Pre-tax Line-Item Total (USD)", v: Math.round(totalCost * 100) / 100 });
   info.addRow({ f: "Generated", v: (/* @__PURE__ */ new Date()).toISOString() });
