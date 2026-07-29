@@ -97,6 +97,52 @@
     0 8px 24px rgba(10, 10, 10, 0.06),
     0 24px 48px -12px rgba(10, 10, 10, 0.08);
   --glass-shadow-red: 0 12px 32px -8px oklch(0.6 0.215 30 / 22%);
+
+  /* ---- Consumption Insights: service-category identity -------------------
+     One fixed hue per service category, covering all 19 values of the
+     parser's closed enum (server/enrichment.ts VALID_CATEGORIES). Used for
+     every FILL representing that category, everywhere. Never reused to mean
+     anything else -- pricing status has its own scale below, and the two
+     never share a hue.
+
+     TIER 1 (vivid) carries material spend on a typical bill. TIER 2 (deep)
+     is the long tail, deliberately lower chroma so a 0.4% slice never shouts
+     louder than a 40% one.
+
+     Hex rather than oklch: these are categorical data colours checked
+     against a measured contrast floor, not theme tokens that need to shift
+     with the palette. */
+  --cat-compute: #E1332D;        /* tier 1 - red, brand */
+  --cat-database: #E8730A;       /* tier 1 - AWS orange */
+  --cat-storage: #C2870B;        /* tier 1 - yellow */
+  --cat-analytics: #65A30D;      /* tier 1 - lime */
+  --cat-containers: #0F766E;     /* tier 1 - teal */
+  --cat-networking: #0891B2;     /* tier 1 - cyan */
+  --cat-management: #0369A1;     /* tier 1 - steel blue */
+  --cat-appint: #1D4ED8;         /* tier 1 - blue */
+  --cat-marketplace: #4338CA;    /* tier 1 - indigo */
+  --cat-security: #7C3AED;       /* tier 1 - violet */
+  --cat-ml: #9333EA;             /* tier 2 - purple */
+  --cat-devtools: #A21CAF;       /* tier 2 - fuchsia */
+  --cat-euc: #BE185D;            /* tier 2 - pink */
+  --cat-bizapps: #9F1239;        /* tier 2 - rose */
+  --cat-media: #7F1D1D;          /* tier 2 - maroon */
+  --cat-iot: #164E63;            /* tier 2 - deep cyan */
+  --cat-migration: #7C2D12;      /* tier 2 - sienna */
+  --cat-support: #334155;        /* tier 2 - graphite */
+  --cat-other: #57534E;          /* tier 2 - stone */
+
+  /* ---- Consumption Insights: pricing status -----------------------------
+     Only ever on the pricing-model bar and generation badges. One reserved
+     hue (emerald) plus neutral weight. No category owns green, so there is
+     nothing for it to collide with. On-Demand is deliberately colourless:
+     it renders as the UNFILLED part of the bar, so how much of the bar is
+     coloured is how much of the spend carries a discount. */
+  --st-committed: #059669;
+  --st-committed-2: #047857;   /* Reserved: same family, darker so it clears 3:1 */
+  --st-spot: #075985;          /* sky-800: no category owns this */
+  --cov-empty: rgba(0, 0, 0, 0.09);
+
 }
 
 .dark {
@@ -158,6 +204,35 @@
     0 8px 24px rgba(0, 0, 0, 0.35),
     0 24px 48px -12px rgba(0, 0, 0, 0.55);
   --glass-shadow-red: 0 12px 32px -8px oklch(0.73 0.185 30 / 30%);
+
+  /* Consumption Insights: same hue order, lifted in lightness and chroma to
+     hold up against the near-black surface. Tier 1 stays vivid, tier 2 stays
+     recessive. */
+  --cat-compute: #FF6B5E;
+  --cat-database: #FF9900;       /* true AWS orange reads correctly on dark */
+  --cat-storage: #FACC15;
+  --cat-analytics: #A3E635;
+  --cat-containers: #2DD4BF;
+  --cat-networking: #22D3EE;
+  --cat-management: #38BDF8;
+  --cat-appint: #60A5FA;
+  --cat-marketplace: #818CF8;
+  --cat-security: #C084FC;
+  --cat-ml: #D8B4FE;
+  --cat-devtools: #E879F9;
+  --cat-euc: #F9A8D4;
+  --cat-bizapps: #FDA4AF;
+  --cat-media: #FCA5A5;
+  --cat-iot: #A5F3FC;
+  --cat-migration: #FDBA74;
+  --cat-support: #CBD5E1;
+  --cat-other: #A8A29E;
+
+  --st-committed: #34D399;
+  --st-committed-2: #6EE7B7;
+  --st-spot: #7DD3FC;          /* was #38BDF8, identical to --cat-management */
+  --cov-empty: rgba(255, 255, 255, 0.10);
+
 }
 
 @layer base {

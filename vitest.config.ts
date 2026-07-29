@@ -14,6 +14,11 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
+    // client/src is included for the design-token test, which parses the real
+    // index.css. It needs no DOM, so the default node environment is fine.
+    include: [
+      "server/**/*.test.ts", "server/**/*.spec.ts",
+      "client/src/**/*.test.ts",
+    ],
   },
 });
