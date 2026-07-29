@@ -47,35 +47,27 @@ const bill = {
 const getBillById = vi.fn();
 const getBomItemsByBill = vi.fn();
 vi.mock("../db", () => ({
-  default: {
-    getBillById: (...a: unknown[]) => getBillById(...a),
-    getBomItemsByBill: (...a: unknown[]) => getBomItemsByBill(...a),
-  },
   getBillById: (...a: unknown[]) => getBillById(...a),
   getBomItemsByBill: (...a: unknown[]) => getBomItemsByBill(...a),
+  getDb: vi.fn(),
+  createBill: vi.fn(),
+  updateBill: vi.fn(),
+  listBillsBySession: vi.fn(),
+  hasBillsForSession: vi.fn(),
+  insertBomItems: vi.fn(),
+  deleteBill: vi.fn(),
 }));
 
-/** The procedure body, lifted so it can be exercised without a tRPC server. */
+/**
+ * Calls the REAL wired procedure through the app router. An earlier version
+ * of this file re-implemented the procedure body locally, which would have
+ * kept passing even if the router drifted away from it - the exact failure
+ * an integration test exists to catch.
+ */
 async function callGetInsights(billId: number, sessionId: string) {
-  const b = await getBillById(billId);
-  if (!b || b.sessionId !== sessionId) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
-  }
-  const rows = await getBomItemsByBill(b.id);
-  const items: InsightLineItem[] = rows.map((r: any) => ({
-    region: r.region,
-    serviceCategory: r.serviceCategory,
-    serviceName: r.serviceName,
-    description: r.description,
-    quantity: r.quantity === null ? null : Number(r.quantity),
-    uom: r.uom,
-    costUsd: Number(r.costUsd),
-  }));
-  return {
-    billId: b.id, fileName: b.fileName, billingPeriod: b.billingPeriod, accountId: b.accountId,
-    statedTotalUsd: b.grandTotalUsd === null ? null : Number(b.grandTotalUsd),
-    insights: computeInsights(items),
-  };
+  const { appRouter } = await import("../routers");
+  const caller = appRouter.createCaller({ req: {} as never, res: {} as never, sessionId });
+  return caller.bills.getInsights({ billId });
 }
 
 beforeEach(() => {
