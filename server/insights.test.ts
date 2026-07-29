@@ -304,7 +304,7 @@ describe("zero-cost companion lines must not halve a machine rate", () => {
     const msg = withFreeCompanion.notes.map(n => n.message).join(" ");
     expect(msg).toMatch(/3,600 instance-hours/);
     expect(msg).toMatch(/billed at \$0\.00/);
-    expect(msg).toMatch(/excluded from the rates/);
+    expect(msg).toMatch(/excluded from the observed hourly rates/);
   });
 
   it("still blends genuinely different PAID rates for the same machine", () => {
@@ -350,5 +350,81 @@ describe("an all-zero-cost instance bill is described accurately", () => {
     ]);
     const msg = none.notes.filter(n => n.topic === "machines").map(n => n.message).join(" ");
     expect(msg).toMatch(/no hourly instance charges/);
+  });
+});
+
+describe("panels must disclose what their classifier could not name", () => {
+  // Found live on B&G: the storage-classes panel showed $4,883.31 while the
+  // Storage category totalled $5,030.34. The panel's own shares still summed
+  // to 100%, so nothing on the page looked wrong - $147.03 had simply
+  // vanished from view.
+  const storageLines = (): InsightLineItem[] => [
+    line("$0.10 per GB-month of snapshot data stored - Asia Pacific (Mumbai)",
+      { serviceCategory: "Storage", costUsd: 900 }),
+    line("$0.114 per GB-month of General Purpose (gp2) provisioned storage",
+      { serviceCategory: "Storage", costUsd: 100 }),
+    // Neither of these names a volume or tier type, so storageClass() -> null.
+    line("AWS Backup - warm storage protected by backup plan",
+      { serviceCategory: "Storage", serviceName: "AWS Backup", costUsd: 30 }),
+    line("FSx for Windows File Server throughput capacity",
+      { serviceCategory: "Storage", serviceName: "FSx", costUsd: 17.03 }),
+  ];
+
+  it("states the dollar amount and line count missing from the storage panel", () => {
+    const ins = computeInsights(storageLines());
+    const n = ins.notes.find(x => x.topic === "storage" && x.kind === "partial");
+    expect(n).toBeDefined();
+    expect(n!.message).toContain("$47.03");
+    expect(n!.message).toContain("2 line items");
+    expect(n!.message).toMatch(/still counted everywhere else/);
+  });
+
+  it("keeps the hidden spend in the bill total, so nothing is lost", () => {
+    const ins = computeInsights(storageLines());
+    const panel = ins.byStorageClass.reduce((s, r) => s + r.costUsd, 0);
+    expect(ins.totalUsd).toBe(1047.03);
+    expect(panel).toBe(1000);
+    expect(ins.totalUsd - panel).toBeCloseTo(47.03, 2);
+  });
+
+  it("says nothing when every storage line was classified", () => {
+    const ins = computeInsights(storageLines().slice(0, 2));
+    expect(ins.notes.find(x => x.topic === "storage" && x.kind === "partial")).toBeUndefined();
+  });
+
+  it("does not fire on classified spend that exceeds its category total", () => {
+    // EBS snapshots are invoiced under the EC2 header, so classified storage
+    // can legitimately be larger than the Storage category. That is not a
+    // shortfall and must not be reported as one.
+    const ins = computeInsights([
+      line("$0.10 per GB-month of snapshot data stored", { serviceCategory: "Compute", costUsd: 500 }),
+      line("$0.114 per GB-month of General Purpose (gp2) provisioned storage",
+        { serviceCategory: "Storage", costUsd: 100 }),
+    ]);
+    expect(ins.notes.find(x => x.topic === "storage" && x.kind === "partial")).toBeUndefined();
+  });
+
+  it("applies the same disclosure to database engines", () => {
+    const ins = computeInsights([
+      line("$0.068 per RDS db.t3.medium instance-hour running MySQL",
+        { serviceCategory: "Database", serviceName: "Relational Database Service", costUsd: 200 }),
+      line("Amazon Keyspaces - on-demand read request units",
+        { serviceCategory: "Database", serviceName: "Amazon Keyspaces", costUsd: 12.5 }),
+    ]);
+    const n = ins.notes.find(x => x.topic === "database" && x.kind === "partial");
+    expect(n).toBeDefined();
+    expect(n!.message).toContain("$12.50");
+    expect(n!.message).toContain("1 line item");
+    expect(n!.message).toContain("engine");
+  });
+
+  it("ignores zero-cost unclassified lines, which hide no money", () => {
+    const ins = computeInsights([
+      line("$0.114 per GB-month of General Purpose (gp2) provisioned storage",
+        { serviceCategory: "Storage", costUsd: 100 }),
+      line("AWS Backup - warm storage protected by backup plan",
+        { serviceCategory: "Storage", serviceName: "AWS Backup", costUsd: 0 }),
+    ]);
+    expect(ins.notes.find(x => x.topic === "storage" && x.kind === "partial")).toBeUndefined();
   });
 });

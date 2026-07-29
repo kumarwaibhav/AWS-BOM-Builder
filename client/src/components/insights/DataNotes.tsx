@@ -17,8 +17,24 @@ const STYLE: Record<DataNote["kind"], { border: string; label: string }> = {
   context: { border: "var(--cat-management)",   label: "Worth knowing" },
 };
 
-export default function DataNotes({ notes, topic }: { notes: DataNote[]; topic?: DataNote["topic"] }) {
-  const shown = topic ? notes.filter(n => n.topic === topic) : notes;
+export default function DataNotes({
+  notes,
+  topic,
+  exclude,
+}: {
+  notes: DataNote[];
+  topic?: DataNote["topic"];
+  /**
+   * Topics already rendered inline beside the figure they qualify. Section 06
+   * passes these so the same caveat is not printed twice on one page.
+   */
+  exclude?: readonly DataNote["topic"][];
+}) {
+  const shown = topic
+    ? notes.filter(n => n.topic === topic)
+    : exclude
+      ? notes.filter(n => !exclude.includes(n.topic))
+      : notes;
   if (!shown.length) return null;
 
   return (

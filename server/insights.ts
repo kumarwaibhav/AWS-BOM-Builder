@@ -410,7 +410,8 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
       note("context", "machines",
         excludedHoursLabel + " instance-hours on this bill are billed at " +
         "$0.00 - features such as EBS-optimized throughput that AWS includes with the instance. They are " +
-        "excluded from the rates below, because counting them would understate what each machine actually costs.");
+        "excluded from the observed hourly rates, because counting them would understate what each machine " +
+        "actually costs.");
     }
     const blended = machineRates.filter(r => r.isBlended).length;
     if (blended > 0) {
@@ -439,11 +440,41 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
   const instanceTotal = instanceItems.reduce((s, i) => s + i.costUsd, 0);
 
   /* ---- remaining data-availability notes ----------------------------- */
-  const storageTotal = items.reduce((s, i) => s + (storageClass(i) ? i.costUsd : 0), 0);
+  // A classifier that returns null for an unrecognised description drops that
+  // line out of its panel entirely. On B&G that quietly removed $147.03 of
+  // Storage: the panel's own shares still summed to 100%, so nothing looked
+  // wrong. Any shortfall against the category total is now stated on screen.
+  function classifierShortfall(
+    label: string,
+    topic: DataNote["topic"],
+    category: string,
+    keyFn: (i: InsightLineItem) => string | null,
+  ): number {
+    const inCategory = items.filter(i => (i.serviceCategory || "Other") === category);
+    const categoryTotal = inCategory.reduce((s, i) => s + i.costUsd, 0);
+    const classified = items.reduce((s, i) => s + (keyFn(i) ? i.costUsd : 0), 0);
+    if (categoryTotal <= 0) return classified;
+    // Classified spend can exceed the category total, because these charges are
+    // invoiced under several service headers - an EBS snapshot sits under EC2,
+    // an S3 request under S3. Only a shortfall hides money.
+    const missing = round2(categoryTotal - classified);
+    const unclassifiedLines = inCategory.filter(i => keyFn(i) === null && i.costUsd !== 0).length;
+    if (missing >= 0.01 && unclassifiedLines > 0) {
+      note("partial", topic,
+        usd(missing) + " of " + category.toLowerCase() + " spend across " + unclassifiedLines +
+        " line " + (unclassifiedLines === 1 ? "item" : "items") + " is not shown in the " + label +
+        " panel, because the bill's description does not name a recognisable " +
+        (topic === "storage" ? "volume or tier type" : "engine") +
+        ". It is still counted everywhere else on this page, including the total.");
+    }
+    return classified;
+  }
+
+  const storageTotal = classifierShortfall("storage classes", "storage", "Storage", storageClass);
   if (storageTotal === 0) {
     note("absent", "storage", "No storage charges appear on this bill.");
   }
-  const dbTotal = items.reduce((s, i) => s + (dbEngine(i) ? i.costUsd : 0), 0);
+  const dbTotal = classifierShortfall("database engines", "database", "Database", dbEngine);
   if (dbTotal === 0) {
     note("absent", "database", "No managed database charges appear on this bill.");
   }

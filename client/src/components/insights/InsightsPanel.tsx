@@ -56,6 +56,12 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
   );
 }
 
+/**
+ * Note topics that are rendered inline beside the figure they qualify. Section
+ * 06 is the catch-all for everything else, and must not repeat these.
+ */
+const INLINE_NOTE_TOPICS = ["machines", "storage", "database", "regions", "commitment"] as const;
+
 export default function InsightsPanel({ insights }: { insights: BillInsights }) {
   const ins = insights;
 
@@ -74,6 +80,8 @@ export default function InsightsPanel({ insights }: { insights: BillInsights }) 
   const topRegion = ins.byRegion[0];
   const c = ins.commitment;
   const instanceTotal = ins.byInstanceType.reduce((s, r) => s + r.costUsd, 0);
+  const shownInline = ins.notes.filter(n =>
+    (INLINE_NOTE_TOPICS as readonly string[]).includes(n.topic)).length;
 
   return (
     <div>
@@ -191,7 +199,11 @@ export default function InsightsPanel({ insights }: { insights: BillInsights }) 
             />
           </Panel>
         </div>
-        <div className="mt-4"><DataNotes notes={ins.notes} topic="machines" /></div>
+        <div className="mt-4">
+          <DataNotes notes={ins.notes} topic="machines" />
+          <DataNotes notes={ins.notes} topic="storage" />
+          <DataNotes notes={ins.notes} topic="database" />
+        </div>
       </Section>
 
       {/* 04 --------------------------------------------------------------- */}
@@ -235,7 +247,14 @@ export default function InsightsPanel({ insights }: { insights: BillInsights }) 
         title="What this bill can and cannot tell you"
         blurb="Bills are routinely partial — customers export whatever their console gives them. These notes state plainly what is visible here and what is not."
       >
-        <DataNotes notes={ins.notes} />
+        <DataNotes notes={ins.notes} exclude={INLINE_NOTE_TOPICS} />
+        {shownInline > 0 && (
+          <p className="mt-4 text-sm text-muted-foreground">
+            {shownInline === 1
+              ? "One further note is shown above, beside the figure it qualifies."
+              : `${shownInline} further notes are shown above, each beside the figure it qualifies.`}
+          </p>
+        )}
         {ins.notes.length === 0 && (
           <p className="text-sm text-muted-foreground">
             This bill is complete: every figure on this page is derived from itemised charges with

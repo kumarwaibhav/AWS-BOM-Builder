@@ -185,3 +185,38 @@ describe("colour contract holds for real category names", () => {
     expect(fellBack).toEqual([]);
   });
 });
+
+describe("DataNotes must not print the same caveat twice on one page", () => {
+  const notes = [
+    { kind: "context", topic: "machines", message: "MACHINE NOTE" },
+    { kind: "partial", topic: "storage", message: "STORAGE NOTE" },
+    { kind: "context", topic: "bill", message: "BILL NOTE" },
+  ] as const;
+
+  it("renders only the excluded-topic complement in the catch-all section", () => {
+    // Section 06 previously rendered every note again, so a reader saw the
+    // same sentence in two places on one page.
+    const html = renderToStaticMarkup(
+      <DataNotes notes={notes as never} exclude={["machines", "storage"] as never} />);
+    expect(html).toContain("BILL NOTE");
+    expect(html).not.toContain("MACHINE NOTE");
+    expect(html).not.toContain("STORAGE NOTE");
+  });
+
+  it("still renders a single topic when asked for one inline", () => {
+    const html = renderToStaticMarkup(<DataNotes notes={notes as never} topic="storage" />);
+    expect(html).toContain("STORAGE NOTE");
+    expect(html).not.toContain("BILL NOTE");
+  });
+
+  it("renders nothing rather than an empty box when the complement is empty", () => {
+    const html = renderToStaticMarkup(
+      <DataNotes notes={notes as never} exclude={["machines", "storage", "bill"] as never} />);
+    expect(html).toBe("");
+  });
+
+  it("falls back to every note when neither filter is given", () => {
+    const html = renderToStaticMarkup(<DataNotes notes={notes as never} />);
+    for (const n of notes) expect(html).toContain(n.message);
+  });
+});
