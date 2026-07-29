@@ -48,26 +48,73 @@ const CATEGORY_RULES: Array<{ pattern: RegExp; category: string }> = [
   { pattern: /simple storage service|\bs3\b|glacier|elastic file system|\befs\b|\bfsx\b|storage gateway|\bbackup\b|\bebs\b/i, category: "Storage" },
   { pattern: /relational database|\brds\b|dynamodb|elasticache|redshift|documentdb|neptune|timestream|memorydb|aurora|keyspaces/i, category: "Database" },
   { pattern: /athena|elastic mapreduce|\bemr\b|kinesis|\bglue\b|quicksight|opensearch|elasticsearch|\bmsk\b|managed streaming|lake formation|data pipeline|firehose/i, category: "Analytics" },
-  { pattern: /cloudwatch|cloudtrail|\bconfig\b|systems manager|cloudformation|organizations|control tower|service catalog|trusted advisor|license manager|managed grafana|managed prometheus|auto ?scaling/i, category: "Management & Governance" },
-  { pattern: /identity and access|\biam\b|key management|\bkms\b|secrets manager|certificate manager|guardduty|inspector|macie|\bwaf\b|shield|cognito|security hub|directory service|firewall/i, category: "Security, Identity & Compliance" },
+  { pattern: /cloudwatch|cloudtrail|\bconfig\b|systems manager|cloudformation|organizations|control tower|service catalog|trusted advisor|license manager|managed grafana|managed prometheus|auto ?scaling|cost explorer|aws budgets|cost and usage report/i, category: "Management & Governance" },
+  { pattern: /identity and access|\biam\b|key management|\bkms\b|secrets manager|certificate manager|guardduty|inspector|macie|\bwaf\b|shield|cognito|security hub|directory service|firewall|detective/i, category: "Security, Identity & Compliance" },
   { pattern: /simple notification|\bsns\b|simple queue|\bsqs\b|step functions|eventbridge|\bmq\b|appflow|simple workflow/i, category: "Application Integration" },
   { pattern: /sagemaker|comprehend|rekognition|polly|transcribe|translate|textract|\blex\b|bedrock|forecast|personalize|kendra/i, category: "Machine Learning & AI" },
-  { pattern: /codebuild|codecommit|codedeploy|codepipeline|codeartifact|cloud9|x-ray|codestar/i, category: "Developer Tools" },
+  { pattern: /codebuild|codecommit|codedeploy|codepipeline|codeartifact|cloud9|x-ray|codestar|amplify|\bkiro\b/i, category: "Developer Tools" },
   { pattern: /elastic container|\becs\b|\beks\b|kubernetes|container registry|\becr\b/i, category: "Containers" },
   { pattern: /workspaces|appstream|worklink/i, category: "End User Computing" },
   { pattern: /simple email|\bses\b|workmail|\bchime\b|pinpoint/i, category: "Business Applications" },
-  { pattern: /database migration|\bdms\b|migration hub|datasync|snowball|transfer family/i, category: "Migration & Transfer" },
+  { pattern: /database migration|\bdms\b|migration hub|datasync|snowball|transfer family|elastic disaster recovery|\bdrs\b/i, category: "Migration & Transfer" },
   { pattern: /elemental|mediaconvert|medialive|mediapackage|\bivs\b|interactive video/i, category: "Media Services" },
   { pattern: /\biot\b/i, category: "Internet of Things" },
-  { pattern: /support/i, category: "Support" },
+  // Anchored: a bare /support/i also matched Marketplace products whose vendor
+  // blurb contains the word ("Ubuntu 18 | support by Gigabits"), filing $507
+  // of third-party software under AWS Support.
+  { pattern: /\b(?:aws|business|developer|enterprise|basic)\s+support\b|^support$/i, category: "Support" },
+];
+
+/**
+ * Leaf-level overrides, evaluated before the service-header rules.
+ *
+ * An AWS bill nests sub-services under a service header, and the header is
+ * normally the correct signal: GuardDuty analysing Lambda logs is Security,
+ * not Compute; CloudWatch delivering logs to S3 is Management, not Storage.
+ * Deriving the category from the leaf description instead would misfile all
+ * of those. These are the narrow exceptions where the sub-service names a
+ * genuinely different product from the header it is billed under.
+ */
+const SUBSERVICE_OVERRIDES: Array<{ pattern: RegExp; category: string }> = [
+  // EBS is a storage product invoiced beneath the "Elastic Compute Cloud"
+  // header. Without this, every EBS volume and snapshot charge lands in
+  // Compute - $14,094.59 across the 13 reference bills.
+  { pattern: /\bEBS\b|\belastic block store\b/i, category: "Storage" },
+  // NAT Gateway is likewise invoiced under the EC2 header but is a
+  // networking charge - $3,868.89 across the reference bills.
+  { pattern: /\bnat ?gateway\b/i, category: "Networking & Content Delivery" },
 ];
 
 /** Classify an AWS service name into a category; empty string when unknown. */
-export function classifyService(serviceName: string, subService = ""): string {
-  const haystack = `${serviceName} ${subService}`;
+export function classifyService(serviceName: string, subService = "", description = ""): string {
+  for (const rule of SUBSERVICE_OVERRIDES) {
+    if (rule.pattern.test(subService)) return rule.category;
+  }
+  // The service header is the authoritative signal and is matched ALONE first.
+  // Folding the sub-service into the same haystack lets a usage-type name
+  // hijack the category whenever it happens to contain another service's
+  // keyword: "OpenSearch ESDomain" matched /domain/ and became Networking,
+  // "Inspector EC2-Scanning" matched /ec2/ and became Compute, "GuardDuty
+  // PaidLambdaNetworkLogsAnalyzed" matched /lambda/ and became Compute.
+  // That mislabelled $3,415.79 across the 13 reference bills.
+  for (const rule of CATEGORY_RULES) {
+    if (rule.pattern.test(serviceName)) return rule.category;
+  }
+
+  // Only when the header says nothing does the sub-service get a vote - some
+  // bills carry a bare header ("Bandwidth") whose meaning lives in the leaf.
+  const haystack = `${serviceName} ${subService}`.trim();
   for (const rule of CATEGORY_RULES) {
     if (rule.pattern.test(haystack)) return rule.category;
   }
+
+  // Marketplace LAST, as a fallback for third-party software the rules could
+  // not otherwise place. It must not pre-empt the real rules: Bedrock
+  // foundation models (Claude, Cohere) are invoiced through Marketplace but
+  // are genuinely Machine Learning & AI consumption, and a presales engineer
+  // needs them mapped to the target cloud's AI service, not buried under
+  // "third-party software".
+  if (/\bAWS Marketplace\b|\bsold by\b/i.test(description)) return "AWS Marketplace";
   return "";
 }
 
@@ -93,6 +140,21 @@ const REGION_NAMES = [
   "AWS GovCloud (US-East)", "AWS GovCloud (US-West)", "No Region",
 ];
 const REGION_SET = new Set(REGION_NAMES.map(r => r.toLowerCase()));
+
+/**
+ * True when the PDF contains an itemised "Charges by service" table.
+ *
+ * The AWS console can export two very different documents: the one-page
+ * "AWS estimated bill summary", which carries only a grand total, and the
+ * full Bills page with per-service charge detail. Only the latter can become
+ * a BOM. Detecting the difference lets the upload path tell the user exactly
+ * which export they supplied and how to get the right one, instead of a
+ * generic "no line items found".
+ */
+export function hasItemizedCharges(text: string): boolean {
+  return /DescriptionUsage QuantityAmount in USD/i.test(text)
+      || /Charges by service/i.test(text);
+}
 
 export function isRegionName(name: string): boolean {
   return REGION_SET.has(name.trim().toLowerCase());
@@ -174,6 +236,11 @@ const UOM_WHITELIST_RE = new RegExp(
       // wasn't recognized, forcing the line to fall through to the
       // "no quantity found" default of isGroupLine: true.
       "Accelerator-Hours?", "Dollars?", "Activit(?:y|ies)", "Faces?-Mo",
+      // "5,188 PagesUSD 7.78" (Textract) was read as a group header because
+      // "Pages" was unlisted, silently dropping the whole $7.78 charge and
+      // leaving bill 900206238693 short by exactly that amount.
+      "Pages?", "Documents?", "Jobs?", "Tasks?", "Hosts?", "Clusters?",
+      "Nodes?", "Buckets?", "Tables?", "Indexes?", "Partitions?",
     ].join("|") +
   ")$",
   "i"
@@ -206,6 +273,40 @@ export function isPlausibleUom(phrase: string): boolean {
     return UOM_WHITELIST_RE.test(last) || UOM_COMPOUND_SUFFIX_RE.test(last);
   }
   return false;
+}
+
+/**
+ * Clean a raw UOM captured from the PDF.
+ *
+ * pdf-parse reproduces the visual text, so a unit can arrive kerned apart
+ * ("Config uration ItemRecorded"), carrying a region-code prefix
+ * ("APS3-ConfigurationItemRecorded"), or with leaked rate text in front of it
+ * ("per Secret5 Secrets", "Annotation Requests6 Requests", "address720 Hrs").
+ * The cost and quantity on these rows are correct - only the label is dirty -
+ * but an unnormalised label silently excludes the row from any per-unit
+ * analysis that keys on the unit, such as effective hourly rate.
+ */
+export function normalizeUom(raw: string | null): string | null {
+  if (raw == null) return null;
+  let u = raw.trim().replace(/[\s\u00a0]+/g, " ");
+  if (!u) return null;
+
+  // 1) repair kerning splits inside a single word. Only join when the next
+  //    fragment starts lowercase, so real multi-word units ("Security Checks",
+  //    "Finding Ingestion Events") are left intact.
+  u = u.replace(/([a-z])\s+([a-z])/g, "$1$2");
+
+  // 2) leaked rate text before the real unit: keep the trailing unit when it
+  //    stands on its own as a recognised unit.
+  const tail = u.match(/(?:^|\D)(\d[\d,]*)\s*([A-Za-z][A-Za-z0-9/()-]*)$/);
+  if (tail && isPlausibleUom(tail[2])) return tail[2];
+
+  // 3) AWS region-code prefix ("APS3-", "USE1-"). Requires a digit before the
+  //    dash so compound units such as "GB-Mo" are never truncated.
+  const stripped = u.replace(/^[A-Z]{2,4}\d-\s*/, "");
+  if (stripped !== u && isPlausibleUom(stripped)) return stripped;
+
+  return u;
 }
 
 export interface TokenizedLine {
@@ -250,6 +351,10 @@ export function tokenizeLine(line: string): TokenizedLine | null {
     const quantity = parseFloat(glued[1].replace(/,/g, ""));
     const uom = glued[2].trim();
     const before = rest.slice(0, glued.index ?? 0).trim();
+    // A rate/credit prefix is evidence the line IS a usage leaf, so an
+    // unrecognised unit is still accepted - but only as a single bare token.
+    // Without that restriction "$0.10 per Hour720 Hrs" splits at the rate's
+    // decimal, yielding quantity 10 and unit "per Hour720 Hrs".
     const plausible =
       isPlausibleUom(uom) || RATE_PREFIX_RE.test(before) || CREDIT_LINE_RE.test(before);
     if (!Number.isNaN(quantity) && before.length > 0 && plausible) {
@@ -424,7 +529,7 @@ export function parseAwsBill(text: string): ParsedBill {
       pendingDesc = "";
       if (jt) {
         const serviceName0 = currentService || currentSubService || "Unknown Service";
-        const category0 = classifyService(serviceName0, currentSubService);
+        const category0 = classifyService(serviceName0, currentSubService, jt.description);
         const desc0 = jt.description;
         const prefix0 =
           currentSubService && !desc0.startsWith(currentSubService)
@@ -436,7 +541,7 @@ export function parseAwsBill(text: string): ParsedBill {
           serviceName: serviceName0,
           description: `${prefix0}${desc0}`,
           quantity: jt.quantity,
-          uom: jt.uom,
+          uom: normalizeUom(jt.uom),
           costUsd: jt.costUsd,
           needsEnrichment: category0 === "",
         };
@@ -473,7 +578,7 @@ export function parseAwsBill(text: string): ParsedBill {
       pendingDesc = "";
     }
     const serviceName = currentService || currentSubService || "Unknown Service";
-    const category = classifyService(serviceName, currentSubService);
+    const category = classifyService(serviceName, currentSubService, description);
     const descPrefix =
       currentSubService && !description.startsWith(currentSubService)
         ? `${currentSubService} — `
@@ -484,7 +589,7 @@ export function parseAwsBill(text: string): ParsedBill {
       serviceName,
       description: `${descPrefix}${description}`,
       quantity: tok.quantity,
-      uom: tok.uom,
+      uom: normalizeUom(tok.uom),
       costUsd: tok.costUsd,
       needsEnrichment: category === "",
     };

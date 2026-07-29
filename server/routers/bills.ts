@@ -11,7 +11,7 @@ import { z } from "zod";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { publicProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import { parseAwsBill } from "../billParser";
+import { parseAwsBill, hasItemizedCharges } from "../billParser";
 import { enrichItems } from "../enrichment";
 import { generateBomExcel } from "../excel";
 import { storageGet, storagePut } from "../storage";
@@ -72,7 +72,9 @@ export const billsRouter = router({
         const parsed = parseAwsBill(pdfData.text);
         if (parsed.items.length === 0) {
           throw new Error(
-            "No billing line items found. Please upload a complete AWS 'Bills' PDF export (Billing and Cost Management → Bills → Print/Save as PDF)."
+            hasItemizedCharges(pdfData.text)
+              ? "No billing line items could be read from this PDF. It appears to contain a charges table, but none of the rows could be parsed - please share this file with support."
+              : "This PDF is the AWS bill summary page, which shows only a grand total and no per-service charges. Open Billing and Cost Management -> Bills, expand 'Charges by service', then print or save that page as PDF and upload it here."
           );
         }
 
