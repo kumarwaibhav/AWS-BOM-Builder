@@ -96,8 +96,8 @@ async function main() {
     if (anyCommit === c.hasNoCommitment) bad.push("I8 hasNoCommitment disagrees with the commitment figures");
 
     // I9 anything underivable must be declared, not hidden
-    if (ins.machineRates.length === 0 && !ins.unavailable.some(u => /per-machine rates/.test(u))) {
-      bad.push("I9 no machine rates, yet nothing declared unavailable");
+    if (ins.machineRates.length === 0 && !ins.notes.some(n => /per-machine rates/.test(n.message))) {
+      bad.push("I9 no machine rates, yet no note explaining why");
     }
 
     bad.length ? fail++ : pass++;
@@ -107,7 +107,7 @@ async function main() {
     console.log(`   commitment: gross OD ${money(c.grossOnDemandUsd)}, SP credits ${money(c.savingsPlanCreditsUsd)},`
       + ` SP fees ${money(c.savingsPlanFeesUsd)}, RI ${money(c.reservedUsd)}, Spot ${money(c.spotUsd)}`
       + ` -> coverage ${(c.coverageOfOnDemand * 100).toFixed(1)}%`);
-    if (ins.unavailable.length) ins.unavailable.forEach(u => console.log(`   note: ${u}`));
+    if (ins.notes.length) ins.notes.forEach(n => console.log(`   [${n.kind}/${n.topic}] ${n.message}`));
     bad.forEach(b => console.log(`   FAIL ${b}`));
   }
 

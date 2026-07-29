@@ -182,8 +182,8 @@ describe("computeInsights", () => {
       line("AWS Lambda - Total Requests", { quantity: 1000, uom: "Requests", costUsd: 5 }),
     ]);
     expect(empty.commitment.hasNoCommitment).toBe(true);
-    expect(empty.unavailable.join(" ")).toMatch(/no Savings Plan/i);
-    expect(empty.unavailable.join(" ")).toMatch(/per-machine rates/i);
+    expect(empty.notes.map(n=>n.message).join(" ")).toMatch(/no Savings Plan/i);
+    expect(empty.notes.map(n=>n.message).join(" ")).toMatch(/per-machine rates/i);
   });
 
   it("survives an empty bill without dividing by zero", () => {

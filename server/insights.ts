@@ -204,8 +204,24 @@ export interface BillInsights {
   regionCategoryMatrix: Array<{ region: string; category: string; costUsd: number }>;
   commitment: CommitmentPosture;
   machineRates: MachineRate[];
-  /** Things this bill simply does not contain, stated rather than hidden. */
-  unavailable: string[];
+  /**
+   * Plain-English notes about what this bill does and does not show.
+   *
+   * Customers export whatever their console gives them, so a bill is often
+   * partial. The platform's job is to work with what is on the page and say
+   * clearly what is not there - never to render an empty chart, and never to
+   * demand data the customer cannot produce.
+   */
+  notes: DataNote[];
+}
+
+export interface DataNote {
+  /** "absent" = the bill cannot show this. "partial" = shown, but incomplete. */
+  kind: "absent" | "partial" | "context";
+  /** Which part of the dashboard this note explains. */
+  topic: "commitment" | "machines" | "storage" | "database" | "regions" | "bill";
+  /** One sentence, no jargon, safe to show a customer verbatim. */
+  message: string;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -236,7 +252,10 @@ function breakdown(
 
 export function computeInsights(items: InsightLineItem[]): BillInsights {
   const totalUsd = round2(items.reduce((s, i) => s + i.costUsd, 0));
-  const unavailable: string[] = [];
+  const notes: DataNote[] = [];
+  const note = (kind: DataNote["kind"], topic: DataNote["topic"], message: string) =>
+    notes.push({ kind, topic, message });
+  const usd = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const model = new Map<InsightLineItem, PricingModel>();
   items.forEach(i => model.set(i, pricingModel(i)));
@@ -261,8 +280,17 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
       savingsPlanCreditsUsd === 0 && savingsPlanFeesUsd === 0 && reservedUsd === 0 && spotUsd === 0,
   };
   if (commitment.hasNoCommitment) {
-    unavailable.push(
-      "This bill shows no Savings Plan, Reserved Instance or Spot usage, so no commitment analysis is possible.");
+    note("absent", "commitment",
+      "Every eligible charge on this bill is at standard On-Demand rates. There is no Savings Plan, " +
+      "Reserved Instance or Spot usage anywhere in it.");
+  } else if (savingsPlanCreditsUsd > 0 && savingsPlanFeesUsd === 0) {
+    // Extremely common: the discount lands on the member account, the
+    // commitment was bought on the payer account. Say so plainly instead of
+    // asking the customer for a bill they may not have.
+    note("partial", "commitment",
+      "A Savings Plan discount of " + usd(savingsPlanCreditsUsd) + " is applied here, but the cost of that " +
+      "commitment does not appear on this bill - it sits on the payer account. The discount is real; what " +
+      "was paid to obtain it is not visible from this document.");
   }
 
   interface RateAcc {
@@ -309,7 +337,15 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
     })
     .sort((a, b) => b.costUsd - a.costUsd);
   if (machineRates.length === 0) {
-    unavailable.push("No hourly instance charges were found, so per-machine rates cannot be derived.");
+    note("absent", "machines",
+      "This bill has no hourly instance charges, so there are no per-machine rates to compare.");
+  } else {
+    const blended = machineRates.filter(r => r.isBlended).length;
+    if (blended > 0) {
+      note("context", "machines",
+        blended + " of " + machineRates.length + " machine types were billed under more than one pricing " +
+        "model, so their effective rate is a blend. The individual rates are shown beneath each one.");
+    }
   }
 
   const matrixAcc = new Map<string, { region: string; category: string; costUsd: number }>();
@@ -330,6 +366,38 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
   const instanceItems = items.filter(i => instanceType(i) !== null);
   const instanceTotal = instanceItems.reduce((s, i) => s + i.costUsd, 0);
 
+  /* ---- remaining data-availability notes ----------------------------- */
+  const storageTotal = items.reduce((s, i) => s + (storageClass(i) ? i.costUsd : 0), 0);
+  if (storageTotal === 0) {
+    note("absent", "storage", "No storage charges appear on this bill.");
+  }
+  const dbTotal = items.reduce((s, i) => s + (dbEngine(i) ? i.costUsd : 0), 0);
+  if (dbTotal === 0) {
+    note("absent", "database", "No managed database charges appear on this bill.");
+  }
+  const regions = new Set(items.map(i => i.region));
+  if (regions.size === 1) {
+    note("context", "regions",
+      "Everything on this bill runs in a single region (" + Array.from(regions)[0] + "), so there is no " +
+      "regional split to compare.");
+  }
+  if (totalUsd === 0) {
+    note("context", "bill",
+      "Every line on this bill is zero-cost - free-tier or fully credited usage. There is spend activity " +
+      "to look at, but no money to break down.");
+  }
+  // Instance coverage is worth stating: a rate table built on 12% of the
+  // compute bill should not read as though it covers all of it.
+  if (instanceTotal > 0 && totalUsd > 0) {
+    const pctOfBill = (instanceTotal / totalUsd) * 100;
+    if (pctOfBill < 40) {
+      note("context", "machines",
+        "Named machine types account for " + pctOfBill.toFixed(0) + "% of this bill (" + usd(instanceTotal) +
+        "). The rest is usage-based charges such as storage, data transfer and requests, which are not " +
+        "billed per machine.");
+    }
+  }
+
   return {
     totalUsd,
     lineCount: items.length,
@@ -347,6 +415,6 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
     regionCategoryMatrix,
     commitment,
     machineRates,
-    unavailable,
+    notes,
   };
 }

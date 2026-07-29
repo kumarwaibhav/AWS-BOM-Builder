@@ -12,6 +12,8 @@ import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { publicProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { parseAwsBill, hasItemizedCharges } from "../billParser";
+import { computeInsights } from "../insights";
+import type { InsightLineItem } from "../insights";
 import { enrichItems } from "../enrichment";
 import { generateBomExcel } from "../excel";
 import { storageGet, storagePut } from "../storage";
@@ -176,6 +178,45 @@ export const billsRouter = router({
       }
       const items = await db.getBomItemsByBill(bill.id);
       return { bill, items };
+    }),
+
+  /**
+   * Consumption insights for a single bill.
+   *
+   * Computed on demand from the stored bom_items rather than cached, so
+   * there is no schema change and no migration: the v2 branch and production
+   * can keep sharing the same database safely. Aggregating ~1,100 rows is
+   * sub-millisecond, so the cost is dominated by the existing DB read that
+   * bills.get already performs.
+   */
+  getInsights: publicProcedure
+    .input(z.object({ billId: z.number().int().positive() }))
+    .query(async ({ input, ctx }) => {
+      const bill = await db.getBillById(input.billId);
+      // Same ownership check as every other per-bill procedure: a bill that
+      // is not yours is indistinguishable from one that does not exist.
+      if (!bill || bill.sessionId !== ctx.sessionId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Bill not found" });
+      }
+      const rows = await db.getBomItemsByBill(bill.id);
+      const items: InsightLineItem[] = rows.map(r => ({
+        region: r.region,
+        serviceCategory: r.serviceCategory,
+        serviceName: r.serviceName,
+        description: r.description,
+        quantity: r.quantity === null ? null : Number(r.quantity),
+        uom: r.uom,
+        costUsd: Number(r.costUsd),
+      }));
+      return {
+        billId: bill.id,
+        fileName: bill.fileName,
+        billingPeriod: bill.billingPeriod,
+        accountId: bill.accountId,
+        /** The invoice's own printed total, for the reconciliation banner. */
+        statedTotalUsd: bill.grandTotalUsd === null ? null : Number(bill.grandTotalUsd),
+        insights: computeInsights(items),
+      };
     }),
 
   /** Signed Supabase Storage URL for the generated Excel BOM (re-download anytime). */
