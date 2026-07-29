@@ -213,6 +213,13 @@ export interface BillInsights {
   byCategory: Breakdown[];
   byRegion: Breakdown[];
   byService: Breakdown[];
+  /**
+   * Services within each category, ranked. The composition view drills from a
+   * category into the services inside it; a flat byService list cannot answer
+   * that, and joining the two client-side would let the UI invent a grouping
+   * the server never validated.
+   */
+  servicesByCategory: Record<string, Breakdown[]>;
   byPricingModel: Breakdown[];
   byInstanceType: Breakdown[];
   byGeneration: Breakdown[];
@@ -441,6 +448,13 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
     byCategory: breakdown(items, i => i.serviceCategory || "Other", totalUsd),
     byRegion: breakdown(items, i => i.region, totalUsd),
     byService: breakdown(items, i => i.serviceName, totalUsd),
+    servicesByCategory: Object.fromEntries(
+      Array.from(new Set(items.map(i => i.serviceCategory || "Other"))).map(cat => {
+        const inCat = items.filter(i => (i.serviceCategory || "Other") === cat);
+        const catTotal = inCat.reduce((s2, i) => s2 + i.costUsd, 0);
+        return [cat, breakdown(inCat, i => i.serviceName, catTotal)];
+      }),
+    ),
     byPricingModel: breakdown(items, i => model.get(i) as string, totalUsd),
     byInstanceType: breakdown(instanceItems, instanceType, instanceTotal),
     byGeneration: breakdown(instanceItems, i => generation(instanceType(i)), instanceTotal),
