@@ -202,3 +202,68 @@ describe("computeInsights", () => {
     expect(free.byCategory.every(r => Number.isFinite(r.share))).toBe(true);
   });
 });
+
+describe("charges and credits are never mixed into one percentage", () => {
+  // Found by the full-pipeline audit: byPricingModel produced a share of
+  // -45.34% for "Savings Plan credit" on PSBA, because credits are negative
+  // and were being divided by the bill total. A bar reading minus forty-five
+  // percent of a bill is not something a customer can act on.
+  const withCredit = computeInsights([
+    line("$0.2222 per On Demand Linux m6a.2xlarge Instance Hour",
+      { quantity: 3600, uom: "Hrs", costUsd: 799.92 }),
+    line("m6a.2xlarge Linux instance usage covered by Compute Savings Plans",
+      { quantity: 3600, uom: "Hrs", costUsd: -799.92 }),
+    line("$0.056 per NAT gateway Hour",
+      { serviceCategory: "Networking & Content Delivery", quantity: 720, uom: "Hrs", costUsd: 40.32 }),
+  ]);
+
+  it("never emits a negative share", () => {
+    const all = [
+      ...withCredit.byCategory, ...withCredit.byRegion,
+      ...withCredit.byService, ...withCredit.byPricingModel,
+      ...withCredit.byInstanceType, ...withCredit.byGeneration,
+    ];
+    all.forEach(r => expect(r.share).toBeGreaterThanOrEqual(0));
+  });
+
+  it("never emits a share above 100%", () => {
+    withCredit.byPricingModel.forEach(r => expect(r.share).toBeLessThanOrEqual(1.0001));
+  });
+
+  it("flags credit buckets so the UI can render them as deductions", () => {
+    const credit = withCredit.byPricingModel.find(r => r.key === "Savings Plan credit")!;
+    expect(credit.isCredit).toBe(true);
+    expect(credit.costUsd).toBeLessThan(0);
+    // Its share is of total credits, not of the bill.
+    expect(credit.share).toBeCloseTo(1, 4);
+  });
+
+  it("marks ordinary charge buckets as non-credit", () => {
+    withCredit.byPricingModel.filter(r => r.costUsd > 0)
+      .forEach(r => expect(r.isCredit).toBe(false));
+  });
+
+  it("reports gross charges, credits and net separately", () => {
+    expect(withCredit.grossChargesUsd).toBeCloseTo(840.24, 2);
+    expect(withCredit.creditsUsd).toBeCloseTo(799.92, 2);
+    expect(withCredit.totalUsd).toBeCloseTo(40.32, 2);
+    // net must be exactly gross minus credits
+    expect(withCredit.grossChargesUsd - withCredit.creditsUsd).toBeCloseTo(withCredit.totalUsd, 2);
+  });
+
+  it("explains the split in plain language", () => {
+    const n = withCredit.notes.find(x => x.topic === "bill" && /credits/.test(x.message));
+    expect(n).toBeDefined();
+    expect(n!.message).toMatch(/netting to/);
+    expect(n!.message).not.toMatch(/NaN|undefined/);
+  });
+
+  it("leaves a bill with no credits unaffected", () => {
+    const noCredit = computeInsights([
+      line("$0.056 per NAT gateway Hour", { quantity: 720, uom: "Hrs", costUsd: 40.32 }),
+    ]);
+    expect(noCredit.creditsUsd).toBe(0);
+    expect(noCredit.grossChargesUsd).toBeCloseTo(noCredit.totalUsd, 2);
+    expect(noCredit.byPricingModel.every(r => !r.isCredit)).toBe(true);
+  });
+});

@@ -150,7 +150,20 @@ export function hourlyRate(item: InsightLineItem): number | null {
   return item.costUsd / item.quantity;
 }
 
-export interface Breakdown { key: string; costUsd: number; lineCount: number; share: number }
+export interface Breakdown {
+  key: string;
+  costUsd: number;
+  lineCount: number;
+  /**
+   * Fraction of the relevant whole. Always in [0, 1] so a chart can render it
+   * directly. For a bucket that is a CREDIT (negative cost), this is the
+   * magnitude's share of total credits, not a negative slice - a bar reading
+   * "-45%" of a bill is not a thing a customer can act on.
+   */
+  share: number;
+  /** True when this bucket reduces the bill rather than adding to it. */
+  isCredit: boolean;
+}
 
 export interface CommitmentPosture {
   grossOnDemandUsd: number;
@@ -188,7 +201,12 @@ export interface MachineRate {
 }
 
 export interface BillInsights {
+  /** Net of the bill: charges minus credits. Matches the invoice. */
   totalUsd: number;
+  /** Positive charges only, before any credit is applied. */
+  grossChargesUsd: number;
+  /** Credits applied, as a positive magnitude. */
+  creditsUsd: number;
   lineCount: number;
   regionCount: number;
   categoryCount: number;
@@ -240,13 +258,19 @@ function breakdown(
     cur.lineCount += 1;
     acc.set(k, cur);
   }
-  return Array.from(acc.entries())
-    .map(([key, v]) => ({
-      key,
-      costUsd: round2(v.costUsd),
-      lineCount: v.lineCount,
-      share: total === 0 ? 0 : v.costUsd / total,
-    }))
+  const rows = Array.from(acc.entries()).map(([key, v]) => ({
+    key, costUsd: round2(v.costUsd), lineCount: v.lineCount, isCredit: v.costUsd < 0,
+  }));
+  // Charges and credits are different wholes. A Savings Plan credit is -45% of
+  // the bill total, which is meaningless as a slice; it is 100% of the credits
+  // applied, which is meaningful. Each bucket is shared against its own side.
+  const chargeTotal = rows.filter(r => !r.isCredit).reduce((s, r) => s + r.costUsd, 0);
+  const creditTotal = Math.abs(rows.filter(r => r.isCredit).reduce((s, r) => s + r.costUsd, 0));
+  return rows
+    .map(r => {
+      const denom = r.isCredit ? creditTotal : (chargeTotal || total);
+      return { ...r, share: denom === 0 ? 0 : Math.abs(r.costUsd) / denom };
+    })
     .sort((a, b) => b.costUsd - a.costUsd);
 }
 
@@ -398,8 +422,19 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
     }
   }
 
+  const grossChargesUsd = round2(items.filter(i => i.costUsd > 0).reduce((s, i) => s + i.costUsd, 0));
+  const creditsUsd = round2(Math.abs(items.filter(i => i.costUsd < 0).reduce((s, i) => s + i.costUsd, 0)));
+  if (creditsUsd > 0) {
+    note("context", "bill",
+      "This bill shows " + usd(grossChargesUsd) + " of charges less " + usd(creditsUsd) +
+      " of credits, netting to " + usd(totalUsd) + ". Percentages for charges and credits are " +
+      "shown against their own totals, not mixed together.");
+  }
+
   return {
     totalUsd,
+    grossChargesUsd,
+    creditsUsd,
     lineCount: items.length,
     regionCount: new Set(items.map(i => i.region)).size,
     categoryCount: new Set(items.map(i => i.serviceCategory || "Other")).size,

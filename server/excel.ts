@@ -65,7 +65,9 @@ export async function generateBomExcel(
     const r = ws.addRow({
       sno: row.sno,
       region: row.region,
-      serviceCategory: row.serviceCategory,
+      // Defence in depth: enrichment normally fills this, but a blank cell in
+      // a customer-facing BOM is worse than an explicit "Other".
+      serviceCategory: row.serviceCategory || "Other",
       serviceName: row.serviceName,
       description: row.description,
       quantity: row.quantity,
