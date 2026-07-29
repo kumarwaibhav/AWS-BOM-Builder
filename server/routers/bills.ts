@@ -32,6 +32,19 @@ import { storageGet, storagePut } from "../storage";
 // instead of the platform's opaque one for anything larger.
 const MAX_PDF_BYTES = 3 * 1024 * 1024; // 3 MB raw (see comment above)
 
+/**
+ * Postgres int4 ceiling. Without this bound, an id larger than 2^31-1
+ * reaches the driver, overflows the column type, and the thrown error - which
+ * embeds the full SELECT statement and every column name - is returned to the
+ * caller verbatim. Found by fuzzing the deployed preview with billId 10^12:
+ *
+ *   Failed query: select "id", "sessionId", "fileName", "pdfKey", ...
+ *
+ * Rejecting it at the schema keeps the schema private and gives the caller a
+ * plain validation error instead of a database stack trace.
+ */
+const MAX_BILL_ID = 2_147_483_647;
+
 export const billsRouter = router({
   /** Upload a PDF (base64), parse it, enrich, persist everything. */
   uploadAndParse: publicProcedure
@@ -170,7 +183,7 @@ export const billsRouter = router({
 
   /** A single bill + its BOM items (table preview). */
   get: publicProcedure
-    .input(z.object({ billId: z.number().int().positive() }))
+    .input(z.object({ billId: z.number().int().positive().max(MAX_BILL_ID) }))
     .query(async ({ input, ctx }) => {
       const bill = await db.getBillById(input.billId);
       if (!bill || bill.sessionId !== ctx.sessionId) {
@@ -190,7 +203,7 @@ export const billsRouter = router({
    * bills.get already performs.
    */
   getInsights: publicProcedure
-    .input(z.object({ billId: z.number().int().positive() }))
+    .input(z.object({ billId: z.number().int().positive().max(MAX_BILL_ID) }))
     .query(async ({ input, ctx }) => {
       const bill = await db.getBillById(input.billId);
       // Same ownership check as every other per-bill procedure: a bill that
@@ -221,7 +234,7 @@ export const billsRouter = router({
 
   /** Signed Supabase Storage URL for the generated Excel BOM (re-download anytime). */
   downloadExcel: publicProcedure
-    .input(z.object({ billId: z.number().int().positive() }))
+    .input(z.object({ billId: z.number().int().positive().max(MAX_BILL_ID) }))
     .mutation(async ({ input, ctx }) => {
       const bill = await db.getBillById(input.billId);
       if (!bill || bill.sessionId !== ctx.sessionId) {
@@ -236,7 +249,7 @@ export const billsRouter = router({
 
   /** Signed Supabase Storage URL for the original uploaded PDF. */
   downloadPdf: publicProcedure
-    .input(z.object({ billId: z.number().int().positive() }))
+    .input(z.object({ billId: z.number().int().positive().max(MAX_BILL_ID) }))
     .mutation(async ({ input, ctx }) => {
       const bill = await db.getBillById(input.billId);
       if (!bill || bill.sessionId !== ctx.sessionId) {
@@ -248,7 +261,7 @@ export const billsRouter = router({
 
   /** Delete a bill and its items from history. */
   remove: publicProcedure
-    .input(z.object({ billId: z.number().int().positive() }))
+    .input(z.object({ billId: z.number().int().positive().max(MAX_BILL_ID) }))
     .mutation(async ({ input, ctx }) => {
       const bill = await db.getBillById(input.billId);
       if (!bill || bill.sessionId !== ctx.sessionId) {
