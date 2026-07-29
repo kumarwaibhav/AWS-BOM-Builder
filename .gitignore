@@ -12,3 +12,10 @@ dist/
 *~
 .turbo/
 coverage/
+
+# Bill-verification output — contains real customer AWS account IDs,
+# bill filenames and spend totals. Never commit to a public repo.
+scripts/verify-bills-results.json
+scripts/*-results.json
+*.bill.json
+big-bill.json
