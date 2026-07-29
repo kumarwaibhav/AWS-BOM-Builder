@@ -80,6 +80,9 @@ const SUBSERVICE_OVERRIDES: Array<{ pattern: RegExp; category: string }> = [
   // header. Without this, every EBS volume and snapshot charge lands in
   // Compute - $14,094.59 across the 13 reference bills.
   { pattern: /\bEBS\b|\belastic block store\b/i, category: "Storage" },
+  // NAT Gateway is likewise invoiced under the EC2 header but is a
+  // networking charge - $3,868.89 across the reference bills.
+  { pattern: /\bnat ?gateway\b/i, category: "Networking & Content Delivery" },
 ];
 
 /** Classify an AWS service name into a category; empty string when unknown. */
@@ -87,6 +90,19 @@ export function classifyService(serviceName: string, subService = "", descriptio
   for (const rule of SUBSERVICE_OVERRIDES) {
     if (rule.pattern.test(subService)) return rule.category;
   }
+  // The service header is the authoritative signal and is matched ALONE first.
+  // Folding the sub-service into the same haystack lets a usage-type name
+  // hijack the category whenever it happens to contain another service's
+  // keyword: "OpenSearch ESDomain" matched /domain/ and became Networking,
+  // "Inspector EC2-Scanning" matched /ec2/ and became Compute, "GuardDuty
+  // PaidLambdaNetworkLogsAnalyzed" matched /lambda/ and became Compute.
+  // That mislabelled $3,415.79 across the 13 reference bills.
+  for (const rule of CATEGORY_RULES) {
+    if (rule.pattern.test(serviceName)) return rule.category;
+  }
+
+  // Only when the header says nothing does the sub-service get a vote - some
+  // bills carry a bare header ("Bandwidth") whose meaning lives in the leaf.
   const haystack = `${serviceName} ${subService}`.trim();
   for (const rule of CATEGORY_RULES) {
     if (rule.pattern.test(haystack)) return rule.category;
@@ -335,6 +351,10 @@ export function tokenizeLine(line: string): TokenizedLine | null {
     const quantity = parseFloat(glued[1].replace(/,/g, ""));
     const uom = glued[2].trim();
     const before = rest.slice(0, glued.index ?? 0).trim();
+    // A rate/credit prefix is evidence the line IS a usage leaf, so an
+    // unrecognised unit is still accepted - but only as a single bare token.
+    // Without that restriction "$0.10 per Hour720 Hrs" splits at the rate's
+    // decimal, yielding quantity 10 and unit "per Hour720 Hrs".
     const plausible =
       isPlausibleUom(uom) || RATE_PREFIX_RE.test(before) || CREDIT_LINE_RE.test(before);
     if (!Number.isNaN(quantity) && before.length > 0 && plausible) {
