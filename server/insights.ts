@@ -344,11 +344,22 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
     models: Map<PricingModel, { hours: number; costUsd: number }>;
   }
   const rateAcc = new Map<string, RateAcc>();
+  let excludedZeroCostHours = 0;
   for (const i of items) {
     const t = instanceType(i);
-    // Zero-cost rows are kept: RI-covered hours are real usage billed at
-    // USD 0.00, and dropping them would overstate the effective rate.
     if (!t || hourlyRate(i) === null || i.costUsd < 0) continue;
+    // Zero-cost rows must NOT enter the denominator.
+    //
+    // AWS prints an included-at-no-charge companion line beside a paid
+    // instance line, e.g. "$0.00 for 1061 Mbps per m6a.xlarge instance-hour
+    // (or partial hour) 719 Hrs USD 0.00" - that is EBS-optimized throughput
+    // bundled with the instance, not a second set of instance hours. Counting
+    // its hours halved every affected rate: on PSBA, m6a.2xlarge printed
+    // $0.2222/hr and we reported $0.1111/hr, and six more machine types were
+    // understated by exactly 50%. That number feeds the apples-to-apples
+    // comparison against the target cloud, so a 2x understatement is the
+    // worst kind of wrong - confidently precise and completely false.
+    if (i.costUsd === 0) { excludedZeroCostHours += i.quantity as number; continue; }
     const k = t + "|" + i.region;
     const cur = rateAcc.get(k) || { hours: 0, costUsd: 0, type: t, region: i.region, models: new Map() };
     cur.hours += i.quantity as number;
@@ -386,6 +397,12 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
     note("absent", "machines",
       "This bill has no hourly instance charges, so there are no per-machine rates to compare.");
   } else {
+    if (excludedZeroCostHours > 0) {
+      note("context", "machines",
+        Math.round(excludedZeroCostHours).toLocaleString() + " instance-hours on this bill are billed at " +
+        "$0.00 - features such as EBS-optimized throughput that AWS includes with the instance. They are " +
+        "excluded from the rates below, because counting them would understate what each machine actually costs.");
+    }
     const blended = machineRates.filter(r => r.isBlended).length;
     if (blended > 0) {
       note("context", "machines",

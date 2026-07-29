@@ -55,7 +55,14 @@ export default function CoverageBar({ commitment }: { commitment: CommitmentPost
                 boxShadow: s.neutral ? "inset 0 0 0 1px var(--border)" : undefined,
               }}
             >
-              <span className="text-lg font-black leading-none tabular-nums">{fmtPct(share)}</span>
+              {/* A segment narrower than ~6% cannot hold a percentage without
+                  clipping it. On PSBA the 0.6% On-Demand sliver rendered in a
+                  9px-wide box and the overflowing text read as "6%" - an
+                  order of magnitude out. The legend below always carries the
+                  exact figure, so the safe move is to print nothing here. */}
+              {share >= 0.06 && (
+                <span className="text-lg font-black leading-none tabular-nums">{fmtPct(share)}</span>
+              )}
               {share >= 0.11 && (
                 <span className="mt-1 font-mono text-[9.5px] font-semibold uppercase tracking-wider truncate max-w-full">
                   {s.label}
@@ -74,7 +81,8 @@ export default function CoverageBar({ commitment }: { commitment: CommitmentPost
               style={{ background: s.fill, boxShadow: s.neutral ? "inset 0 0 0 1px var(--border)" : undefined }}
             />
             {s.label}{" "}
-            <b className="font-mono text-[11.5px] font-bold text-foreground">{fmtUsd(s.usd)}</b> · {s.note}
+            <b className="font-mono text-[11.5px] font-bold text-foreground">{fmtUsd(s.usd)}</b>
+            {" "}({fmtPct(s.usd / total)}) · {s.note}
           </span>
         ))}
       </div>

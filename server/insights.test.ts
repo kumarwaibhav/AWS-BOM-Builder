@@ -267,3 +267,56 @@ describe("charges and credits are never mixed into one percentage", () => {
     expect(noCredit.byPricingModel.every(r => !r.isCredit)).toBe(true);
   });
 });
+
+describe("zero-cost companion lines must not halve a machine rate", () => {
+  // Found by reading the live rate table on PSBA. AWS prints an
+  // included-at-no-charge line beside a paid instance line:
+  //
+  //   $0.2222 per On Demand Linux m6a.2xlarge Instance Hour   3,600 Hrs  $799.92
+  //   $0.00 for 1061 Mbps per m6a.2xlarge instance-hour       3,600 Hrs    $0.00
+  //
+  // That second line is EBS-optimized throughput bundled with the instance,
+  // not another 3,600 instance-hours. Counting its hours reported $0.1111/hr
+  // for a machine the bill prices at $0.2222 - exactly half - and did the
+  // same to six more machine types on that one bill.
+  const withFreeCompanion = computeInsights([
+    line("$0.2222 per On Demand Linux m6a.2xlarge Instance Hour",
+      { quantity: 3600, uom: "Hrs", costUsd: 799.92 }),
+    line("$0.00 for 1061 Mbps per m6a.2xlarge instance-hour (or partial hour)",
+      { quantity: 3600, uom: "Hrs", costUsd: 0 }),
+  ]);
+
+  it("reports the rate the bill actually prints", () => {
+    const r = withFreeCompanion.machineRates.find(x => x.instanceType === "m6a.2xlarge")!;
+    expect(r.effectiveRateUsd).toBeCloseTo(0.2222, 4);
+    expect(r.hours).toBeCloseTo(3600, 1);
+    expect(r.costUsd).toBeCloseTo(799.92, 2);
+  });
+
+  it("does not treat the free companion line as a second pricing model", () => {
+    const r = withFreeCompanion.machineRates.find(x => x.instanceType === "m6a.2xlarge")!;
+    expect(r.isBlended).toBe(false);
+    expect(r.byModel).toHaveLength(1);
+    expect(r.byModel[0].model).toBe("On-Demand");
+  });
+
+  it("discloses the excluded hours rather than dropping them silently", () => {
+    const msg = withFreeCompanion.notes.map(n => n.message).join(" ");
+    expect(msg).toMatch(/3,600 instance-hours/);
+    expect(msg).toMatch(/billed at \$0\.00/);
+    expect(msg).toMatch(/excluded from the rates/);
+  });
+
+  it("still blends genuinely different PAID rates for the same machine", () => {
+    const twoPaid = computeInsights([
+      line("$0.3740 per On Demand Linux c6a.4xlarge Instance Hour",
+        { quantity: 1000, uom: "Hrs", costUsd: 374 }),
+      line("c6a.4xlarge reserved instance applied",
+        { quantity: 1000, uom: "Hrs", costUsd: 123.8 }),
+    ]);
+    const r = twoPaid.machineRates.find(x => x.instanceType === "c6a.4xlarge")!;
+    expect(r.isBlended).toBe(true);
+    expect(r.byModel).toHaveLength(2);
+    expect(r.effectiveRateUsd).toBeCloseTo((374 + 123.8) / 2000, 4);
+  });
+});
