@@ -393,13 +393,22 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
       };
     })
     .sort((a, b) => b.costUsd - a.costUsd);
+  const excludedHoursLabel = Math.round(excludedZeroCostHours).toLocaleString();
   if (machineRates.length === 0) {
-    note("absent", "machines",
-      "This bill has no hourly instance charges, so there are no per-machine rates to compare.");
+    // Distinguish "no instance charges at all" from "instance charges exist
+    // but every one of them is $0.00". Saying the former when the latter is
+    // true is exactly the class of false statement this layer must not make -
+    // a fully free-tier or fully commitment-covered account does have
+    // instance hours, they simply carry no cost on the usage line.
+    note("absent", "machines", excludedZeroCostHours > 0
+      ? "Every instance-hour on this bill is billed at $0.00 - " + excludedHoursLabel + " hours in total, "
+        + "either free-tier usage or hours already covered by a commitment whose cost sits elsewhere. "
+        + "There is no rate to compare, because nothing was charged per hour."
+      : "This bill has no hourly instance charges, so there are no per-machine rates to compare.");
   } else {
     if (excludedZeroCostHours > 0) {
       note("context", "machines",
-        Math.round(excludedZeroCostHours).toLocaleString() + " instance-hours on this bill are billed at " +
+        excludedHoursLabel + " instance-hours on this bill are billed at " +
         "$0.00 - features such as EBS-optimized throughput that AWS includes with the instance. They are " +
         "excluded from the rates below, because counting them would understate what each machine actually costs.");
     }

@@ -320,3 +320,35 @@ describe("zero-cost companion lines must not halve a machine rate", () => {
     expect(r.effectiveRateUsd).toBeCloseTo((374 + 123.8) / 2000, 4);
   });
 });
+
+describe("an all-zero-cost instance bill is described accurately", () => {
+  // A regression I introduced with the zero-cost rate fix and caught by
+  // re-reading the branch: excluding every zero-cost line can empty
+  // machineRates, and the empty branch then claimed "this bill has no hourly
+  // instance charges". That is false for a fully free-tier or fully
+  // commitment-covered account - the hours exist, they just cost nothing.
+  const allFree = computeInsights([
+    line("$0.00 per On Demand Linux t3.micro Instance Hour - free tier",
+      { quantity: 744, uom: "Hrs", costUsd: 0 }),
+  ]);
+
+  it("does not claim there are no instance charges", () => {
+    const msg = allFree.notes.filter(n => n.topic === "machines").map(n => n.message).join(" ");
+    expect(msg).not.toMatch(/no hourly instance charges/);
+  });
+
+  it("says every instance-hour was billed at zero, and how many", () => {
+    const msg = allFree.notes.filter(n => n.topic === "machines").map(n => n.message).join(" ");
+    expect(msg).toMatch(/Every instance-hour on this bill is billed at \$0\.00/);
+    expect(msg).toMatch(/744 hours/);
+    expect(allFree.machineRates).toEqual([]);
+  });
+
+  it("still says the plain thing when there really are no instance lines", () => {
+    const none = computeInsights([
+      line("AWS Lambda - Total Requests", { quantity: 1000, uom: "Requests", costUsd: 5 }),
+    ]);
+    const msg = none.notes.filter(n => n.topic === "machines").map(n => n.message).join(" ");
+    expect(msg).toMatch(/no hourly instance charges/);
+  });
+});
