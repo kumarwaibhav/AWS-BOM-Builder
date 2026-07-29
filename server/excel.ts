@@ -65,7 +65,11 @@ export async function generateBomExcel(
     const r = ws.addRow({
       sno: row.sno,
       region: row.region,
-      serviceCategory: row.serviceCategory,
+      // Defence in depth: LLM enrichment normally fills this, but a blank
+      // cell in a customer-facing BOM is worse than an explicit "Other".
+      // Enrichment has failed wholesale before (the Gemini schema bug), and
+      // when it does, every unclassified row shipped with an empty column.
+      serviceCategory: row.serviceCategory || "Other",
       serviceName: row.serviceName,
       description: row.description,
       quantity: row.quantity,
