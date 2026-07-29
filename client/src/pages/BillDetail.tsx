@@ -3,6 +3,7 @@
  * No user accounts -- access is scoped by a server-issued signed httpOnly
  * session cookie (see server/_core/sessionCookie.ts), checked server-side.
  */
+import { useState } from "react";
 import { useParams, Link } from "wouter";
 import { ArrowLeft, AlertTriangle, CheckCircle2, Download, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -10,7 +11,10 @@ import { Button } from "@/components/ui/button";
 import SwissHeader from "@/components/SwissHeader";
 import SwissFooter from "@/components/SwissFooter";
 import BomTable from "@/components/BomTable";
+import InsightsPanel from "@/components/insights/InsightsPanel";
 import { trpc } from "@/lib/trpc";
+
+type Tab = "items" | "insights";
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -31,6 +35,16 @@ export default function BillDetail() {
     { billId },
     { enabled: Number.isFinite(billId) }
   );
+  const [tab, setTab] = useState<Tab>("items");
+
+  // Only fetched once the tab is opened. The BOM table is what most visits
+  // want, and there is no reason to make it wait on an aggregation it may
+  // never display.
+  const insightsQuery = trpc.bills.getInsights.useQuery(
+    { billId },
+    { enabled: tab === "insights" && Number.isFinite(billId) },
+  );
+
   const downloadExcel = trpc.bills.downloadExcel.useMutation();
   const downloadPdf = trpc.bills.downloadPdf.useMutation();
 
@@ -182,12 +196,62 @@ export default function BillDetail() {
                 )
               )}
 
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs font-mono uppercase tracking-[0.2em] text-muted-foreground">
-                  {data.items.length} line items · chevron mark = AI-classified
-                </span>
+              <div className="mb-5 flex border-b border-border">
+                {([
+                  ["items", "Line Items"],
+                  ["insights", "Consumption Insights"],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setTab(key)}
+                    aria-selected={tab === key}
+                    role="tab"
+                    className={`mr-8 border-b-2 px-1 py-3.5 font-mono text-xs font-semibold uppercase tracking-[0.12em] transition-colors ${
+                      tab === key
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}>
+                    {label}
+                  </button>
+                ))}
               </div>
-              <BomTable items={data.items} />
+
+              {tab === "items" ? (
+                <>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xs font-mono uppercase tracking-[0.2em] text-muted-foreground">
+                      {data.items.length} line items · chevron mark = AI-classified
+                    </span>
+                  </div>
+                  <BomTable items={data.items} />
+                </>
+              ) : insightsQuery.isLoading ? (
+                <div className="glass flex items-center justify-center gap-3 rounded-[var(--radius-glass)] p-12">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm text-muted-foreground">Analysing this bill…</span>
+                </div>
+              ) : insightsQuery.error ? (
+                <div className="glass rounded-[var(--radius-glass)] p-8">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                    <div>
+                      <p className="text-sm font-semibold">Could not analyse this bill.</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {insightsQuery.error.message}
+                      </p>
+                      <Button
+                        variant="outline"
+                        onClick={() => insightsQuery.refetch()}
+                        className="mt-4 h-10 rounded-none border-black text-xs font-bold uppercase tracking-widest">
+                        Try again
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : insightsQuery.data ? (
+                <InsightsPanel insights={insightsQuery.data.insights} />
+              ) : null}
             </>
           )}
         </div>
