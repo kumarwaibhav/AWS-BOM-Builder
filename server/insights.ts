@@ -284,8 +284,23 @@ function breakdown(
 export function computeInsights(items: InsightLineItem[]): BillInsights {
   const totalUsd = round2(items.reduce((s, i) => s + i.costUsd, 0));
   const notes: DataNote[] = [];
-  const note = (kind: DataNote["kind"], topic: DataNote["topic"], message: string) =>
+  /**
+   * A bill with no line items supports no claims at all.
+   *
+   * Found in Phase 7 against the live deployment: tj-dev is a summary-only
+   * AWS export with zero itemised charges, and the note generators happily
+   * asserted "every eligible charge is at standard On-Demand rates" and
+   * "every line on this bill is zero-cost - there is spend activity to look
+   * at". Both are false: there are no charges and no lines, and the invoice
+   * states $871.66. The UI happened to mask it by short-circuiting on
+   * lineCount === 0, but the API returned the misleading text to anything
+   * else that asked.
+   */
+  const hasLines = items.length > 0;
+  const note = (kind: DataNote["kind"], topic: DataNote["topic"], message: string) => {
+    if (!hasLines) return;
     notes.push({ kind, topic, message });
+  };
   const usd = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const model = new Map<InsightLineItem, PricingModel>();
@@ -427,6 +442,15 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
         "). The rest is usage-based charges such as storage, data transfer and requests, which are not " +
         "billed per machine.");
     }
+  }
+
+  if (!hasLines) {
+    notes.push({
+      kind: "absent", topic: "bill",
+      message: "This bill has no itemised charges, so there is nothing to break down. "
+             + "The AWS console can export a one-page bill summary that carries only a grand total; "
+             + "open Billing and Cost Management, expand 'Charges by service', and export that page instead.",
+    });
   }
 
   const grossChargesUsd = round2(items.filter(i => i.costUsd > 0).reduce((s, i) => s + i.costUsd, 0));

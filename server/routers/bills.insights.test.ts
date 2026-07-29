@@ -139,6 +139,28 @@ describe("bills.getInsights - degradation", () => {
     expect(res.insights.notes.length).toBeGreaterThan(0);
   });
 
+  it("asserts nothing about a bill that has no line items", async () => {
+    // Found in Phase 7 against the live deployment. tj-dev is a summary-only
+    // AWS export with zero itemised charges, and the note generators claimed
+    // "every eligible charge is at standard On-Demand rates" and "every line
+    // on this bill is zero-cost - there is spend activity to look at". Both
+    // are false, and the invoice states $871.66. The UI masked it by
+    // short-circuiting on lineCount === 0; the API did not.
+    getBomItemsByBill.mockResolvedValue([]);
+    const { insights } = await callGetInsights(42, OWNER);
+
+    expect(insights.notes).toHaveLength(1);
+    expect(insights.notes[0].message).toMatch(/no itemised charges/i);
+    expect(insights.notes[0].message).toMatch(/Charges by service/);
+
+    const all = insights.notes.map(n => n.message).join(" ");
+    expect(all).not.toMatch(/standard On-Demand rates/);
+    expect(all).not.toMatch(/zero-cost/);
+    expect(all).not.toMatch(/spend activity/);
+    expect(all).not.toMatch(/No storage charges/);
+    expect(all).not.toMatch(/No managed database charges/);
+  });
+
   it("handles null quantity and null uom", async () => {
     getBomItemsByBill.mockResolvedValue([
       { region: "Global", serviceCategory: "Support", serviceName: "AWS Support",
