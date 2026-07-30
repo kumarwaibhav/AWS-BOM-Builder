@@ -6,7 +6,7 @@
  * measured impact across that set, so a regression is obvious in review.
  */
 import { describe, it, expect } from "vitest";
-import { classifyService, normalizeUom, isPlausibleUom, tokenizeLine, hasItemizedCharges, detectBillCurrency, isRegionName } from "./billParser";
+import { classifyService, normalizeUom, isPlausibleUom, tokenizeLine, hasItemizedCharges, detectBillCurrency, isRegionName, repairKerning } from "./billParser";
 
 describe("D2 — EBS is Storage, not Compute", () => {
   it("files EBS under Storage even though it is invoiced beneath the EC2 header", () => {
@@ -182,5 +182,60 @@ describe("regions AWS launches after this code was written", () => {
     ]) {
       expect(isRegionName(s)).toBe(false);
     }
+  });
+});
+
+describe("repairKerning", () => {
+  // pdf.js decomposes an f-ligature and inserts a spurious space a few glyphs
+  // later. Verified in the SHIPPED Excel BOM for B&G: 6 of 1,138 rows read
+  // "Amazon Simple Notific ation Service" / "AWS Certific ate Manager" - text
+  // the customer reads in the deliverable. No ligature codepoints survive in
+  // the output, so expanding U+FB01 cannot fix it.
+  it("rejoins AWS vocabulary broken by a stray space", () => {
+    expect(repairKerning("Amazon Simple Notific ation Service APS3-Requests-Tier1"))
+      .toBe("Amazon Simple Notification Service APS3-Requests-Tier1");
+    expect(repairKerning("AWS Certific ate Manager")).toBe("AWS Certificate Manager");
+    expect(repairKerning("Config urationItemRecorded")).toBe("ConfigurationItemRecorded");
+    expect(repairKerning("Classific ationJobs")).toBe("ClassificationJobs");
+    expect(repairKerning("Verific ationAttempts")).toBe("VerificationAttempts");
+  });
+
+  it("repairs a break glued to surrounding text, with no word boundary", () => {
+    expect(repairKerning("USE1-IssuePublicCertific ateDomain"))
+      .toBe("USE1-IssuePublicCertificateDomain");
+  });
+
+  it("leaves legitimate multi-word text completely alone", () => {
+    // normalizeUom joins any two adjacent lowercase words, which would destroy
+    // a sentence. These are the phrases that prove this repair is bounded.
+    for (const s of [
+      "per 1,000 requests", "Security Checks", "Finding Ingestion Events",
+      "first 50 TB", "the file was", "data transfer out", "Simple Storage Service",
+      "flow logs per hour", "free tier", "if it fits", "of file storage",
+      "A flat fee", "First 1,000,000 Amazon SNS", "Amazon Simple Notification Service",
+      "AWS Certificate Manager", "profile of the fleet", "final filter",
+      "ConfigurationItemRecorded", "Notifications", "fileSystem",
+      "FirstTierRequests", "specification document", "the traffic flow",
+      "GB-Mo of file storage per month",
+    ]) {
+      expect(repairKerning(s)).toBe(s);
+    }
+  });
+
+  it("preserves the case of the broken word", () => {
+    expect(repairKerning("notific ations")).toBe("notifications");
+    expect(repairKerning("Notific ations")).toBe("Notifications");
+  });
+
+  it("is a no-op on text with no spaces at all", () => {
+    expect(repairKerning("NotificationDeliveryAttempts")).toBe("NotificationDeliveryAttempts");
+    expect(repairKerning("")).toBe("");
+  });
+
+  it("never produces an empty-alternation regex that shreds the text", () => {
+    // A word shorter than six letters yields an EMPTY alternation, which
+    // matches at every position. This is the bug the clean-phrase list caught.
+    const long = "per 1,000 requests for the first tier of file storage per month";
+    expect(repairKerning(long)).toBe(long);
   });
 });
