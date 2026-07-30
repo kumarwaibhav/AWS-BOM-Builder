@@ -45,6 +45,46 @@ const MAX_PDF_BYTES = 3 * 1024 * 1024; // 3 MB raw (see comment above)
  */
 const MAX_BILL_ID = 2_147_483_647;
 
+/**
+ * A message that was written to be shown to a customer.
+ *
+ * Everything thrown inside the upload pipeline used to reach the customer
+ * verbatim AND be persisted into the bill record, so the History archive
+ * displayed library internals. Observed live: a PDF that pdf.js disliked
+ * produced the entire user-facing error "bad XRef entry", in the toast and
+ * then permanently in History.
+ */
+class UserFacingError extends Error {}
+
+/**
+ * Extract text from the PDF, retrying once.
+ *
+ * Observed live on the deployed preview: a byte-identical PDF - correct xref
+ * entry offsets, correct startxref, valid trailer, read without complaint by
+ * an independent parser, and delivered to the server intact - was accepted
+ * once and then rejected four consecutive times with "bad XRef entry". The
+ * extraction step is therefore not treated as deterministic. A retry costs
+ * one PDF parse on a path that was already about to fail.
+ */
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  try {
+    return (await pdfParse(buffer)).text;
+  } catch (first) {
+    console.error("[upload] PDF extraction failed, retrying once:", first);
+    try {
+      return (await pdfParse(buffer)).text;
+    } catch (second) {
+      console.error("[upload] PDF extraction failed on retry:", second);
+      throw new UserFacingError(
+        "This PDF could not be read. Its internal structure is not one the PDF reader accepts, " +
+        "which is common in files produced by a PDF editor, by 'Print to PDF', or by a scanner. " +
+        "Open the bill in AWS Billing and Cost Management, go to Bills, expand 'Charges by service', " +
+        "and use your browser's own Save as PDF on that page - then upload the file it produces."
+      );
+    }
+  }
+}
+
 export const billsRouter = router({
   /** Upload a PDF (base64), parse it, enrich, persist everything. */
   uploadAndParse: publicProcedure
@@ -71,23 +111,38 @@ export const billsRouter = router({
       // 1. store the original PDF in Supabase Storage
       const safeName = input.fileName.replace(/[^\w.\-]+/g, "_");
       const pdfKey = `bills/${ctx.sessionId}/${nanoid(10)}-${safeName}`;
-      await storagePut(pdfKey, buffer, "application/pdf");
+      // These two steps run BEFORE the bill record exists, so they are outside
+      // the pipeline's catch. Unguarded, a Supabase outage or a database error
+      // here reached the customer as a raw driver message and left no failure
+      // record at all - the upload simply appeared to evaporate.
+      let billId: number;
+      try {
+        await storagePut(pdfKey, buffer, "application/pdf");
 
-      // 2. create the bill record
-      const billId = await db.createBill({
-        sessionId: ctx.sessionId,
-        fileName: input.fileName,
-        pdfKey,
-        status: "processing",
-      });
+        // 2. create the bill record
+        billId = await db.createBill({
+          sessionId: ctx.sessionId,
+          fileName: input.fileName,
+          pdfKey,
+          status: "processing",
+        });
+      } catch (err) {
+        console.error("[upload] could not store the bill before processing:", err);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            "The bill could not be saved, so it was not processed. This is a problem on our side, " +
+            "not with your file. Please try again in a moment.",
+        });
+      }
 
       try {
         // 3. extract text & parse
-        const pdfData = await pdfParse(buffer);
-        const parsed = parseAwsBill(pdfData.text);
+        const pdfText = await extractPdfText(buffer);
+        const parsed = parseAwsBill(pdfText);
         if (parsed.items.length === 0) {
-          throw new Error(
-            hasItemizedCharges(pdfData.text)
+          throw new UserFacingError(
+            hasItemizedCharges(pdfText)
               ? "No billing line items could be read from this PDF. It appears to contain a charges table, but none of the rows could be parsed - please share this file with support."
               : "This PDF is the AWS bill summary page, which shows only a grand total and no per-service charges. Open Billing and Cost Management -> Bills, expand 'Charges by service', then print or save that page as PDF and upload it here."
           );
@@ -170,7 +225,19 @@ export const billsRouter = router({
 
         return { billId, itemCount: enriched.length };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to parse PDF";
+        // Only messages deliberately written for a customer are shown. Storage,
+        // database, enrichment and spreadsheet failures all used to be printed
+        // verbatim in the toast and kept forever in the History archive.
+        let message: string;
+        if (err instanceof UserFacingError) {
+          message = err.message;
+        } else {
+          console.error("[upload] unexpected failure for bill", billId, err);
+          message =
+            "Something went wrong while processing this bill, and it was not the bill's fault. " +
+            "Please try uploading it again. If it fails a second time, send this file to support " +
+            "and quote reference #" + billId + ".";
+        }
         await db.updateBill(billId, { status: "failed", errorMessage: message });
         throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message });
       }
