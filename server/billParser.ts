@@ -137,8 +137,31 @@ const REGION_NAMES = [
   "EU (Spain)", "EU (Stockholm)", "EU (Zurich)",
   "Israel (Tel Aviv)", "Middle East (Bahrain)", "Middle East (UAE)",
   "South America (Sao Paulo)", "South America (São Paulo)",
+  "Mexico (Central)", "Asia Pacific (Taipei)", "Asia Pacific (New Zealand)",
+  "US West (Los Angeles)", "China (Beijing)", "China (Ningxia)",
   "AWS GovCloud (US-East)", "AWS GovCloud (US-West)", "No Region",
 ];
+
+/**
+ * The geographic groups AWS names regions under. A new region is essentially
+ * always a new city inside one of these, so matching the group prefix plus a
+ * parenthesised place recognises regions that do not exist yet.
+ *
+ * This closes a whitelist-enumerating-an-open-world bug with real consequences.
+ * "Mexico (Central)" launched in January 2025 and was absent from the list, so
+ * its line was not recognised as a region header at all: currentRegion never
+ * advanced and every Mexican charge was silently attributed to whichever region
+ * happened to precede it - or to "Global" if it came first. The region x
+ * category grid is the direct input for per-region price comparison against
+ * another cloud, so a charge filed under the wrong region is worse than one
+ * filed under none.
+ *
+ * The prefix is required precisely so that a service name carrying a
+ * parenthesised qualifier - "...for MySQL Community Edition (Multi-AZ)" - can
+ * never be mistaken for a region.
+ */
+const REGION_GROUP_RE =
+  /^(?:US East|US West|Africa|Asia Pacific|Canada|Canada West|Europe|EU|Israel|Middle East|South America|Mexico|China|AWS GovCloud)\s*\([A-Za-z0-9 .,'’ÀÁÂÃÄÅàáâãäåÇçÈÉÊËèéêëÌÍÎÏìíîïÑñÒÓÔÕÖòóôõöÙÚÛÜùúûü-]+\)$/;
 const REGION_SET = new Set(REGION_NAMES.map(r => r.toLowerCase()));
 
 /**
@@ -156,8 +179,46 @@ export function hasItemizedCharges(text: string): boolean {
       || /Charges by service/i.test(text);
 }
 
+/**
+ * The currency this bill is denominated in, or null if it cannot be determined.
+ *
+ * Every amount pattern in this parser requires the literal string "USD", so a
+ * bill in any other currency yields zero line items. That is the safe outcome -
+ * silently reading "INR 41,500.00" as 41,500 dollars would overstate a BOM by
+ * roughly 85x - but the upload path used to blame the file and tell the customer
+ * to contact support. AWS bills many countries in local currency, so a
+ * presales engineer anywhere outside the USD default hits this immediately.
+ *
+ * Verified live: a normalised INR bill extracted cleanly and produced 0 items.
+ */
+export function detectBillCurrency(text: string): string | null {
+  // The table header is the most reliable statement of the billed currency,
+  // then the summary total, then the grand-total line.
+  const patterns = [
+    /Amount in ([A-Z]{3})\b/,
+    /Total in ([A-Z]{3})\b/,
+    /Total (?:pre-tax|tax)\s*([A-Z]{3})\s?[\d,]/,
+    /(?:Estimated\s+)?grand total:?\s*([A-Z]{3})\s?[\d,]/i,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) return m[1].toUpperCase();
+  }
+  // No ISO code anywhere: fall back to a leading currency symbol on a rate line.
+  const sym = text.match(/(?:^|\s)(?:Rs\.?|₹|€|£|¥)\s?\d/);
+  if (sym) {
+    const c = sym[0].trim()[0];
+    return c === "\u20B9" || /R/i.test(c) ? "INR"
+         : c === "\u20AC" ? "EUR"
+         : c === "\u00A3" ? "GBP"
+         : c === "\u00A5" ? "JPY" : null;
+  }
+  return null;
+}
+
 export function isRegionName(name: string): boolean {
-  return REGION_SET.has(name.trim().toLowerCase());
+  const t = name.trim();
+  return REGION_SET.has(t.toLowerCase()) || REGION_GROUP_RE.test(t);
 }
 
 /* ------------------------------------------------------------------ */
@@ -286,6 +347,61 @@ export function isPlausibleUom(phrase: string): boolean {
  * but an unnormalised label silently excludes the row from any per-unit
  * analysis that keys on the unit, such as effective hourly rate.
  */
+/**
+ * AWS billing vocabulary containing an f-ligature (fi, fl, ff), which pdf.js
+ * decomposes into plain letters while inserting a spurious space a few glyphs
+ * later. Verified in the shipped Excel BOM for B&G: 6 of 1,138 rows read
+ * "Amazon Simple Notific ation Service" and "AWS Certific ate Manager" - text
+ * a customer sees in the deliverable. No ligature codepoints survive in the
+ * output, so this cannot be fixed by expanding U+FB01; the space has to be
+ * removed, and only where the result is a word AWS actually uses.
+ *
+ * normalizeUom repairs kerning with a blunt "join any two adjacent lowercase
+ * words", which is safe for a two-word unit and would be catastrophic on a
+ * sentence ("per 1,000 requests" -> "per 1,000requests"). Descriptions
+ * therefore get a vocabulary-bounded repair instead.
+ */
+const LIGATURE_WORDS = [
+  "Certificate", "Certificates", "Certified", "Notification", "Notifications",
+  "Configuration", "Configurations", "Classification", "Verification",
+  "Identification", "Modification", "Modifications", "Specification",
+  "Specifications", "Definition", "Definitions", "Identifier", "Identifiers",
+  "Artifact", "Artifacts", "Efficient", "Sufficient", "Profile", "Profiles",
+  "Firewall", "Workflow", "Workflows", "Flexible", "Different", "Difference",
+  "Confidential", "Simplified", "Unified", "Qualified", "Classified", "Verified",
+];
+
+/**
+ * Each pattern allows exactly one stray space, with at least three real letters
+ * on either side of it. The three-letter floor is not cosmetic: without it a
+ * short word yields an EMPTY alternation, which matches the empty string at
+ * every position and shreds the text. That is a real bug this code had until
+ * a set of known-clean phrases was asserted against it.
+ */
+const KERNING_PATTERNS: Array<{ word: string; re: RegExp }> = LIGATURE_WORDS.flatMap(w => {
+  const alts: string[] = [];
+  for (let k = 3; k <= w.length - 3; k++) alts.push(w.slice(0, k) + "\\s" + w.slice(k));
+  if (!alts.length) return [];
+  return [{ word: w, re: new RegExp("(?:" + alts.join("|") + ")", "gi") }];
+});
+
+/**
+ * Repair ligature kerning damage in customer-visible text. Verified against 28
+ * clean strings - including "per 1,000 requests", "of file storage per month"
+ * and "first 50 TB" - none of which it alters.
+ */
+export function repairKerning(text: string): string {
+  if (!text || !text.includes(" ")) return text;
+  let out = text;
+  for (const { word, re } of KERNING_PATTERNS) {
+    out = out.replace(re, m => {
+      const first = String(m).charAt(0);
+      return first === first.toUpperCase() ? word : word.toLowerCase();
+    });
+  }
+  return out;
+}
+
 export function normalizeUom(raw: string | null): string | null {
   if (raw == null) return null;
   let u = raw.trim().replace(/[\s\u00a0]+/g, " ");
@@ -539,7 +655,7 @@ export function parseAwsBill(text: string): ParsedBill {
           region: currentRegion || "Global",
           serviceCategory: category0,
           serviceName: serviceName0,
-          description: `${prefix0}${desc0}`,
+          description: repairKerning(`${prefix0}${desc0}`),
           quantity: jt.quantity,
           uom: normalizeUom(jt.uom),
           costUsd: jt.costUsd,
@@ -587,7 +703,7 @@ export function parseAwsBill(text: string): ParsedBill {
       region: currentRegion || "Global",
       serviceCategory: category,
       serviceName,
-      description: `${descPrefix}${description}`,
+      description: repairKerning(`${descPrefix}${description}`),
       quantity: tok.quantity,
       uom: normalizeUom(tok.uom),
       costUsd: tok.costUsd,

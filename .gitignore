@@ -19,3 +19,8 @@ scripts/verify-bills-results.json
 scripts/*-results.json
 *.bill.json
 big-bill.json
+
+# Reference bill PDFs used by the component test suites. Real customer billing
+# data must never be committed to this public repository - point BILLS_DIR at
+# the folder instead, or drop the PDFs here locally.
+/reference-bills/
