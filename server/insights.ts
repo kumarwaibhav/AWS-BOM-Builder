@@ -96,7 +96,21 @@ export function generation(type: string | null): Generation | null {
   if (!type) return null;
   const family = type.replace(/^(?:db|cache)\./, "").split(".")[0];
   const n = parseInt((family.match(/\d+/) || ["0"])[0], 10);
-  if (/^t/.test(family)) return n >= 4 ? "Current" : n === 3 ? "Previous" : "Legacy";
+
+  // Accelerator families number a product series, not a generation: trn2 and
+  // inf2 are AWS's CURRENT silicon, while m2 would be ancient. A bare /^t/
+  // test also swallowed trn1/trn2 into the burstable branch, so Trainium -
+  // exactly the hardware an AI workload comparison is about - was badged
+  // LEGACY on screen.
+  if (/^(?:trn|inf|dl)\d/.test(family)) return n >= 2 ? "Current" : "Previous";
+
+  // Burstable T family only: t2, t3, t4g. The digit must follow the t directly,
+  // or trn2 lands here again.
+  if (/^t\d/.test(family)) return n >= 4 ? "Current" : n === 3 ? "Previous" : "Legacy";
+
+  // Everything else follows the numeric generation convention (m5 -> m6 -> m7).
+  // A family with no digit at all tells us nothing, so claim nothing.
+  if (n === 0) return null;
   return n >= 6 ? "Current" : n === 5 ? "Previous" : "Legacy";
 }
 

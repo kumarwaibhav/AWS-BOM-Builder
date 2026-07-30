@@ -428,3 +428,36 @@ describe("panels must disclose what their classifier could not name", () => {
     expect(ins.notes.find(x => x.topic === "storage" && x.kind === "partial")).toBeUndefined();
   });
 });
+
+describe("generation must not call current silicon legacy", () => {
+  // A bare /^t/ test swallowed trn1/trn2 into the burstable branch, so
+  // trn2.48xlarge - AWS's newest Trainium, exactly the hardware an AI workload
+  // comparison is about - was badged LEGACY on screen.
+  it("treats accelerator series numbers as a series, not a generation", () => {
+    expect(generation("trn2.48xlarge")).toBe("Current");
+    expect(generation("inf2.xlarge")).toBe("Current");
+    expect(generation("trn1.32xlarge")).toBe("Previous");
+    expect(generation("inf1.xlarge")).toBe("Previous");
+  });
+
+  it("still reads the burstable T family correctly", () => {
+    expect(generation("t4g.nano")).toBe("Current");
+    expect(generation("t3.small")).toBe("Previous");
+    expect(generation("t2.xlarge")).toBe("Legacy");
+    expect(generation("db.t3.xlarge")).toBe("Previous");
+  });
+
+  it("still reads the numeric generation convention correctly", () => {
+    expect(generation("m8g.large")).toBe("Current");
+    expect(generation("m7i.large")).toBe("Current");
+    expect(generation("m5.large")).toBe("Previous");
+    expect(generation("m4.large")).toBe("Legacy");
+    expect(generation("cache.r6g.large")).toBe("Current");
+  });
+
+  it("claims nothing about a family with no generation digit", () => {
+    // Better an absent badge than a wrong one.
+    expect(generation("metal")).toBeNull();
+    expect(generation(null)).toBeNull();
+  });
+});

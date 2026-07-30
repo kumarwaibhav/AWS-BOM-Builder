@@ -137,8 +137,31 @@ const REGION_NAMES = [
   "EU (Spain)", "EU (Stockholm)", "EU (Zurich)",
   "Israel (Tel Aviv)", "Middle East (Bahrain)", "Middle East (UAE)",
   "South America (Sao Paulo)", "South America (São Paulo)",
+  "Mexico (Central)", "Asia Pacific (Taipei)", "Asia Pacific (New Zealand)",
+  "US West (Los Angeles)", "China (Beijing)", "China (Ningxia)",
   "AWS GovCloud (US-East)", "AWS GovCloud (US-West)", "No Region",
 ];
+
+/**
+ * The geographic groups AWS names regions under. A new region is essentially
+ * always a new city inside one of these, so matching the group prefix plus a
+ * parenthesised place recognises regions that do not exist yet.
+ *
+ * This closes a whitelist-enumerating-an-open-world bug with real consequences.
+ * "Mexico (Central)" launched in January 2025 and was absent from the list, so
+ * its line was not recognised as a region header at all: currentRegion never
+ * advanced and every Mexican charge was silently attributed to whichever region
+ * happened to precede it - or to "Global" if it came first. The region x
+ * category grid is the direct input for per-region price comparison against
+ * another cloud, so a charge filed under the wrong region is worse than one
+ * filed under none.
+ *
+ * The prefix is required precisely so that a service name carrying a
+ * parenthesised qualifier - "...for MySQL Community Edition (Multi-AZ)" - can
+ * never be mistaken for a region.
+ */
+const REGION_GROUP_RE =
+  /^(?:US East|US West|Africa|Asia Pacific|Canada|Canada West|Europe|EU|Israel|Middle East|South America|Mexico|China|AWS GovCloud)\s*\([A-Za-z0-9 .,'’ÀÁÂÃÄÅàáâãäåÇçÈÉÊËèéêëÌÍÎÏìíîïÑñÒÓÔÕÖòóôõöÙÚÛÜùúûü-]+\)$/;
 const REGION_SET = new Set(REGION_NAMES.map(r => r.toLowerCase()));
 
 /**
@@ -194,7 +217,8 @@ export function detectBillCurrency(text: string): string | null {
 }
 
 export function isRegionName(name: string): boolean {
-  return REGION_SET.has(name.trim().toLowerCase());
+  const t = name.trim();
+  return REGION_SET.has(t.toLowerCase()) || REGION_GROUP_RE.test(t);
 }
 
 /* ------------------------------------------------------------------ */

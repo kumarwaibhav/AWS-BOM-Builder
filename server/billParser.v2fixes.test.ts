@@ -6,7 +6,7 @@
  * measured impact across that set, so a regression is obvious in review.
  */
 import { describe, it, expect } from "vitest";
-import { classifyService, normalizeUom, isPlausibleUom, tokenizeLine, hasItemizedCharges, detectBillCurrency } from "./billParser";
+import { classifyService, normalizeUom, isPlausibleUom, tokenizeLine, hasItemizedCharges, detectBillCurrency, isRegionName } from "./billParser";
 
 describe("D2 — EBS is Storage, not Compute", () => {
   it("files EBS under Storage even though it is invoiced beneath the EC2 header", () => {
@@ -143,5 +143,44 @@ describe("detectBillCurrency", () => {
     expect(detectBillCurrency(
       "Amazon Web Services India Private Limited (12)Total pre-taxUSD 96.58"
     )).toBe("USD");
+  });
+});
+
+describe("regions AWS launches after this code was written", () => {
+  // "Mexico (Central)" launched in January 2025 and was absent from the
+  // whitelist, so its line was not recognised as a region header at all:
+  // currentRegion never advanced and every Mexican charge was silently
+  // attributed to whichever region preceded it, or to "Global" if it came
+  // first. The region x category grid is the direct input for per-region
+  // price comparison, so a charge under the wrong region is worse than one
+  // under no region.
+  it("recognises a region that is not in the whitelist", () => {
+    for (const r of ["Mexico (Central)", "Asia Pacific (Taipei)", "Asia Pacific (Kuala Lumpur)",
+                     "Europe (Berlin)", "Middle East (Tel Aviv)", "China (Ningxia)"]) {
+      expect(isRegionName(r)).toBe(true);
+    }
+  });
+
+  it("still recognises every region it always did", () => {
+    for (const r of ["US East (N. Virginia)", "EU (Ireland)", "South America (São Paulo)",
+                     "AWS GovCloud (US-East)", "Global", "Any", "No Region"]) {
+      expect(isRegionName(r)).toBe(true);
+    }
+  });
+
+  it("never mistakes a parenthesised service qualifier for a region", () => {
+    // The geographic prefix is required for exactly this reason. Verified
+    // against all 10,122 distinct lines of the 13 reference bills: zero lines
+    // newly match, so no reference bill can parse differently.
+    for (const s of [
+      "Amazon Relational Database Service for MySQL Community Edition (Multi-AZ)",
+      "Amazon Elastic Compute Cloud running Linux/UNIX",
+      "$0.0090 per 10,000 Proxy HTTP Requests (India)",
+      "Amazon CloudFront IN-Requests-HTTP-Proxy",
+      "Some Vendor Product (Ubuntu 18)",
+      "Elastic Compute Cloud",
+    ]) {
+      expect(isRegionName(s)).toBe(false);
+    }
   });
 });
