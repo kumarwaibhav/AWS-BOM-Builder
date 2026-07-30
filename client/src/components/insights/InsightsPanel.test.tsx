@@ -19,8 +19,14 @@ import { computeInsights } from "../../../../server/insights";
 import type { BillInsights, InsightLineItem } from "../../../../server/insights";
 import InsightsPanel from "./InsightsPanel";
 
+/**
+ * Folder holding the reference bill PDFs. These suites render every component
+ * against REAL bill data; the previous default was an absolute sandbox path that
+ * exists on no other machine, so the loader returned early, zero cases were
+ * generated, and the suite passed while testing nothing.
+ */
 const BILLS_DIR = process.env.BILLS_DIR
-  ?? "/sessions/awesome-adoring-davinci/mnt/FW_ Require AWS usage invoice of June-26 (1)";
+  ?? path.resolve(process.cwd(), "reference-bills");
 
 const bills = new Map<string, BillInsights>();
 const html = new Map<string, string>();
@@ -161,5 +167,17 @@ describe("degradation paths, driven by the real bills that hit them", () => {
       expect(t, file).toMatch(/of charges less \$/);
       expect(t, file).toMatch(/net\./);
     }
+  });
+});
+
+describe("reference bills", () => {
+  it("were actually found, so these tests are testing something", () => {
+    if (process.env.ALLOW_NO_BILLS === "1") return;
+    expect(cases.length,
+      `No reference bill PDFs found in ${BILLS_DIR}. Every test in this file renders a `
+      + `component against REAL bill data, so without them the file generates zero tests `
+      + `and passes while checking nothing. Point BILLS_DIR at the folder containing the `
+      + `bill PDFs, or set ALLOW_NO_BILLS=1 to acknowledge running without them.`
+    ).toBeGreaterThan(0);
   });
 });

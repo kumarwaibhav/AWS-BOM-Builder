@@ -27,8 +27,14 @@ import CategoryKey from "./CategoryKey";
 import DataNotes from "./DataNotes";
 import { categoryToken } from "./tokens";
 
+/**
+ * Folder holding the reference bill PDFs. These suites render every component
+ * against REAL bill data; the previous default was an absolute sandbox path that
+ * exists on no other machine, so the loader returned early, zero cases were
+ * generated, and the suite passed while testing nothing.
+ */
 const BILLS_DIR = process.env.BILLS_DIR
-  ?? "/sessions/awesome-adoring-davinci/mnt/FW_ Require AWS usage invoice of June-26 (1)";
+  ?? path.resolve(process.cwd(), "reference-bills");
 
 type Case = { file: string; ins: BillInsights; items: InsightLineItem[] };
 const cases: Case[] = [];
@@ -218,5 +224,17 @@ describe("DataNotes must not print the same caveat twice on one page", () => {
   it("falls back to every note when neither filter is given", () => {
     const html = renderToStaticMarkup(<DataNotes notes={notes as never} />);
     for (const n of notes) expect(html).toContain(n.message);
+  });
+});
+
+describe("reference bills", () => {
+  it("were actually found, so these tests are testing something", () => {
+    if (process.env.ALLOW_NO_BILLS === "1") return;
+    expect(cases.length,
+      `No reference bill PDFs found in ${BILLS_DIR}. Every test in this file renders a `
+      + `component against REAL bill data, so without them the file generates zero tests `
+      + `and passes while checking nothing. Point BILLS_DIR at the folder containing the `
+      + `bill PDFs, or set ALLOW_NO_BILLS=1 to acknowledge running without them.`
+    ).toBeGreaterThan(0);
   });
 });
