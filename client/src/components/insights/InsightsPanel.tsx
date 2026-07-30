@@ -171,7 +171,7 @@ export default function InsightsPanel({ insights }: { insights: BillInsights }) 
         blurb="The inventory behind the bill. Each panel is filled in its own category colour, so you always know which part of the spend you are looking at. Hardware generation is a badge, never a bar colour."
       >
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Panel title="Machine types" blurb="Instance spend by type.">
+          <Panel title="Machine types" blurb="Instance spend by type, net of any commitment discount credited back.">
             <RankedList
               hue="var(--cat-compute)"
               rows={ins.byInstanceType.map(r => ({
@@ -235,7 +235,7 @@ export default function InsightsPanel({ insights }: { insights: BillInsights }) 
         </div>
         <Panel
           title="Observed rate per machine, per region"
-          blurb="Effective hourly rate actually paid — total cost divided by total hours. Where a machine was billed under more than one pricing model, each model's own observed rate is shown beside the blend."
+          blurb="Effective hourly rate observed on the bill — cost divided by hours, gross of any commitment discount, because AWS bills covered usage at full price and credits it back separately. Where a machine was billed under more than one pricing model, each model's own observed rate is shown beside the blend."
         >
           <RateTable rates={ins.machineRates} />
         </Panel>

@@ -433,6 +433,7 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
         blended + " of " + machineRates.length + " machine types were billed under more than one pricing " +
         "model, so their effective rate is a blend. The individual rates are shown beneath each one.");
     }
+
   }
 
   const matrixAcc = new Map<string, { region: string; category: string; costUsd: number }>();
@@ -452,6 +453,27 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
 
   const instanceItems = items.filter(i => instanceType(i) !== null);
   const instanceTotal = instanceItems.reduce((s, i) => s + i.costUsd, 0);
+
+  // The machine-types panel is NET of commitment credits, because that is what
+  // the account paid. An observed hourly rate must be GROSS, because AWS bills
+  // covered usage at full price and credits it back on a separate line -
+  // dividing the net cost by the hours would report a rate nobody was charged.
+  // Both are right, and on the reference bills they diverge by up to 3.25x
+  // (PSBA: $1,593.93 net against $5,183.87 gross). Two panels in one section
+  // showing different totals for "instance spend" with nothing said about it
+  // reads as an error in one of them.
+  if (machineRates.length > 0) {
+    const instanceGrossUsd = round2(machineRates.reduce((a, m) => a + m.costUsd, 0));
+    const instanceNetUsd = round2(instanceTotal);
+    if (Math.abs(instanceGrossUsd - instanceNetUsd) >= 0.01) {
+      note("context", "machines",
+        "Machine-type spend appears twice on this page, measured two different ways. The machine-types " +
+        "panel is net of commitment discounts - " + usd(instanceNetUsd) + " - because that is what the " +
+        "account actually paid. The observed hourly rates are gross - " + usd(instanceGrossUsd) + " - " +
+        "because AWS bills covered usage at full price and credits it back on a separate line, so a rate " +
+        "divided out of the net cost would be a rate nobody was charged. Both figures are correct.");
+    }
+  }
 
   /* ---- remaining data-availability notes ----------------------------- */
   // A classifier that returns null for an unrecognised description drops that

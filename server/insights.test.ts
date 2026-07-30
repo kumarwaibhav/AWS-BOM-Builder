@@ -461,3 +461,51 @@ describe("generation must not call current silicon legacy", () => {
     expect(generation(null)).toBeNull();
   });
 });
+
+describe("net and gross instance spend must not silently disagree", () => {
+  // Found by validating the live API across all 12 parseable reference bills:
+  // the machine-types panel and the rate table report "instance spend"
+  // differently on 8 of them, by up to 3.25x (PSBA: $1,593.93 against
+  // $5,183.87), with nothing on the page saying so. Both are correct - net is
+  // what was paid, gross is what a rate must be measured against - but two
+  // different totals for the same words read as an error in one of them.
+  const covered = (): InsightLineItem[] => [
+    line("$0.2222 per On Demand Linux m6a.2xlarge Instance Hour",
+      { quantity: 3600, uom: "Hrs", costUsd: 799.92 }),
+    line("m6a.2xlarge Linux instance usage covered by Compute Savings Plans",
+      { quantity: 3600, uom: "Hrs", costUsd: -799.92 }),
+  ];
+
+  it("states both figures when they diverge", () => {
+    const ins = computeInsights(covered());
+    const n = ins.notes.find(x => /appears twice on this page/.test(x.message));
+    expect(n).toBeDefined();
+    expect(n!.topic).toBe("machines");
+    expect(n!.message).toContain("$0.00");     // net: the credit cancels the charge
+    expect(n!.message).toContain("$799.92");   // gross: what the rate is measured on
+    expect(n!.message).toMatch(/Both figures are correct/);
+  });
+
+  it("says nothing when there is no commitment, so the two agree", () => {
+    const ins = computeInsights([
+      line("$0.10 per On Demand Linux m7i.large Instance Hour",
+        { quantity: 1000, uom: "Hrs", costUsd: 100 }),
+    ]);
+    expect(ins.notes.find(x => /appears twice on this page/.test(x.message))).toBeUndefined();
+  });
+
+  it("says nothing when there are no hourly rates at all", () => {
+    const ins = computeInsights([
+      line("$0.023 per GB - first 50 TB / month of storage used",
+        { serviceCategory: "Storage", quantity: 100, uom: "GB-Mo", costUsd: 2.3 }),
+    ]);
+    expect(ins.notes.find(x => /appears twice on this page/.test(x.message))).toBeUndefined();
+  });
+
+  it("keeps the gross figure equal to the rate table it describes", () => {
+    const ins = computeInsights(covered());
+    const gross = ins.machineRates.reduce((a, m) => a + m.costUsd, 0);
+    const n = ins.notes.find(x => /appears twice on this page/.test(x.message))!;
+    expect(n.message).toContain("$" + gross.toFixed(2));
+  });
+});
