@@ -160,3 +160,42 @@ describe("deliberate, already-human messages survive untouched", () => {
     expect(thrown).toMatch(/appears to contain a charges table/);
   });
 });
+
+describe("a bill that is not denominated in USD", () => {
+  // Verified live: an INR bill extracts cleanly and parses to zero line items,
+  // because every amount pattern requires the literal "USD". The old message
+  // blamed the file and told the customer to contact support.
+  it("names the currency instead of blaming the file", async () => {
+    pdfParse.mockResolvedValue({
+      text: "Charges by service\nDescriptionUsage QuantityAmount in INR\n"
+          + "Rs. 20.75 per On Demand Linux m6i.large Instance Hour2,000 HrsINR 41,500.00",
+    });
+    const { thrown } = await failureMessages();
+    expect(thrown).toContain("INR");
+    expect(thrown).not.toMatch(/share this file with support/);
+  });
+
+  it("refuses to convert rather than inventing an exchange rate", async () => {
+    pdfParse.mockResolvedValue({
+      text: "Charges by service\nDescriptionUsage QuantityAmount in EUR\nEUR 1.234,56",
+    });
+    const { thrown } = await failureMessages();
+    expect(thrown).toMatch(/will not convert/i);
+    expect(thrown).toMatch(/exchange rate/i);
+  });
+
+  it("still gives the summary-only guidance for a USD bill with no charges table", async () => {
+    // The currency branch must not swallow the two existing diagnoses.
+    pdfParse.mockResolvedValue({ text: "AWS estimated bill summary\nTotal in USD\nUSD 871.66" });
+    const { thrown } = await failureMessages();
+    expect(thrown).toMatch(/only a grand total/);
+    expect(thrown).not.toContain("denominated");
+  });
+
+  it("does not claim a currency problem when the bill states none", async () => {
+    pdfParse.mockResolvedValue({ text: "Charges by service\nnothing parseable" });
+    const { thrown } = await failureMessages();
+    expect(thrown).not.toContain("denominated");
+    expect(thrown).toMatch(/charges table/);
+  });
+});

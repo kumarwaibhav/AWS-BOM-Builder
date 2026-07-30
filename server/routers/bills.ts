@@ -11,7 +11,7 @@ import { z } from "zod";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { publicProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import { parseAwsBill, hasItemizedCharges } from "../billParser";
+import { parseAwsBill, hasItemizedCharges, detectBillCurrency } from "../billParser";
 import { computeInsights } from "../insights";
 import type { InsightLineItem } from "../insights";
 import { enrichItems } from "../enrichment";
@@ -141,6 +141,22 @@ export const billsRouter = router({
         const pdfText = await extractPdfText(buffer);
         const parsed = parseAwsBill(pdfText);
         if (parsed.items.length === 0) {
+          // A bill in any currency other than USD parses to zero items, because
+          // every amount pattern requires the literal "USD". Refusing is the
+          // right outcome - reading "INR 41,500.00" as dollars would overstate
+          // the BOM by roughly 85x, and converting it would mean inventing an
+          // exchange rate this tool has no business inventing. But the customer
+          // has to be told the actual reason, not asked to contact support.
+          const currency = detectBillCurrency(pdfText);
+          if (currency && currency !== "USD") {
+            throw new UserFacingError(
+              "This bill is denominated in " + currency + ", and this tool reads USD-denominated AWS " +
+              "bills only. It will not convert " + currency + " to USD, because that would mean " +
+              "applying an exchange rate the bill does not state. In the AWS console, open Billing " +
+              "and Cost Management -> Payment preferences and check the invoice currency, or ask " +
+              "the account owner for the USD version of this bill."
+            );
+          }
           throw new UserFacingError(
             hasItemizedCharges(pdfText)
               ? "No billing line items could be read from this PDF. It appears to contain a charges table, but none of the rows could be parsed - please share this file with support."

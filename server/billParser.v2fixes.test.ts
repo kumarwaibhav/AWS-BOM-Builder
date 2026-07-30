@@ -6,7 +6,7 @@
  * measured impact across that set, so a regression is obvious in review.
  */
 import { describe, it, expect } from "vitest";
-import { classifyService, normalizeUom, isPlausibleUom, tokenizeLine, hasItemizedCharges } from "./billParser";
+import { classifyService, normalizeUom, isPlausibleUom, tokenizeLine, hasItemizedCharges, detectBillCurrency } from "./billParser";
 
 describe("D2 — EBS is Storage, not Compute", () => {
   it("files EBS under Storage even though it is invoiced beneath the EC2 header", () => {
@@ -104,5 +104,44 @@ describe("D1 — summary-only exports are distinguishable", () => {
   });
   it("detects a full bill export", () => {
     expect(hasItemizedCharges("Charges by service\nDescriptionUsage QuantityAmount in USD")).toBe(true);
+  });
+});
+
+describe("detectBillCurrency", () => {
+  // Every amount pattern in this parser requires the literal "USD", so a bill
+  // in another currency parses to zero line items. Found live: a normalised INR
+  // bill extracted cleanly, produced 0 items, and the customer was told to
+  // contact support instead of being told the bill was not in USD.
+  it("reads the currency off the charges-table header", () => {
+    expect(detectBillCurrency("DescriptionUsage QuantityAmount in INR")).toBe("INR");
+    expect(detectBillCurrency("DescriptionUsage QuantityAmount in USD")).toBe("USD");
+  });
+
+  it("falls back to the summary total, then the pre-tax line, then the grand total", () => {
+    expect(detectBillCurrency("Total in EUR\nsomething else")).toBe("EUR");
+    expect(detectBillCurrency("Amazon Web Services (4)Total pre-taxGBP 1,234.00")).toBe("GBP");
+    expect(detectBillCurrency("Estimated grand total: JPY 15000")).toBe("JPY");
+  });
+
+  it("recognises a bare currency symbol on a rate line when no ISO code appears", () => {
+    expect(detectBillCurrency("Rs. 20.75 per On Demand Linux m6i.large Instance Hour")).toBe("INR");
+    expect(detectBillCurrency("€0,6173 per On Demand Linux m6i.xlarge Instance Hour")).toBe("EUR");
+    expect(detectBillCurrency("£0.42 per On Demand Linux m6i.large Instance Hour")).toBe("GBP");
+  });
+
+  it("returns null rather than guessing when the bill states no currency", () => {
+    expect(detectBillCurrency("hello world")).toBeNull();
+    expect(detectBillCurrency("")).toBeNull();
+  });
+
+  it("does not mistake an unrelated three-letter word for a currency", () => {
+    // "Amount in" / "Total in" are the anchors; arbitrary capitals must not match.
+    expect(detectBillCurrency("EC2 NAT VPC RDS EBS")).toBeNull();
+  });
+
+  it("reads USD from a real reference bill header, so the USD path is unchanged", () => {
+    expect(detectBillCurrency(
+      "Amazon Web Services India Private Limited (12)Total pre-taxUSD 96.58"
+    )).toBe("USD");
   });
 });

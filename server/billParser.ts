@@ -156,6 +156,43 @@ export function hasItemizedCharges(text: string): boolean {
       || /Charges by service/i.test(text);
 }
 
+/**
+ * The currency this bill is denominated in, or null if it cannot be determined.
+ *
+ * Every amount pattern in this parser requires the literal string "USD", so a
+ * bill in any other currency yields zero line items. That is the safe outcome -
+ * silently reading "INR 41,500.00" as 41,500 dollars would overstate a BOM by
+ * roughly 85x - but the upload path used to blame the file and tell the customer
+ * to contact support. AWS bills many countries in local currency, so a
+ * presales engineer anywhere outside the USD default hits this immediately.
+ *
+ * Verified live: a normalised INR bill extracted cleanly and produced 0 items.
+ */
+export function detectBillCurrency(text: string): string | null {
+  // The table header is the most reliable statement of the billed currency,
+  // then the summary total, then the grand-total line.
+  const patterns = [
+    /Amount in ([A-Z]{3})\b/,
+    /Total in ([A-Z]{3})\b/,
+    /Total (?:pre-tax|tax)\s*([A-Z]{3})\s?[\d,]/,
+    /(?:Estimated\s+)?grand total:?\s*([A-Z]{3})\s?[\d,]/i,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) return m[1].toUpperCase();
+  }
+  // No ISO code anywhere: fall back to a leading currency symbol on a rate line.
+  const sym = text.match(/(?:^|\s)(?:Rs\.?|₹|€|£|¥)\s?\d/);
+  if (sym) {
+    const c = sym[0].trim()[0];
+    return c === "\u20B9" || /R/i.test(c) ? "INR"
+         : c === "\u20AC" ? "EUR"
+         : c === "\u00A3" ? "GBP"
+         : c === "\u00A5" ? "JPY" : null;
+  }
+  return null;
+}
+
 export function isRegionName(name: string): boolean {
   return REGION_SET.has(name.trim().toLowerCase());
 }
