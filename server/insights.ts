@@ -97,6 +97,16 @@ export function generation(type: string | null): Generation | null {
   const family = type.replace(/^(?:db|cache)\./, "").split(".")[0];
   const n = parseInt((family.match(/\d+/) || ["0"])[0], 10);
 
+  // Redshift node families do not use EC2's ladder at all: the LETTERS carry the
+  // generation (DS2 -> DC2 -> RA3) and the digit is meaningless across families.
+  // ra3 is Redshift's CURRENT node type and was rendering as LEGACY because
+  // parseInt("ra3") is 3. On one reference bill that was the single largest
+  // machine line - $449.38, 26.4% of machine spend, top row of the panel.
+  const REDSHIFT_LADDER: Record<string, Generation> = {
+    ds2: "Legacy", dc1: "Legacy", dc2: "Previous", ra3: "Current",
+  };
+  if (family in REDSHIFT_LADDER) return REDSHIFT_LADDER[family];
+
   // Accelerator families number a product series, not a generation: trn2 and
   // inf2 are AWS's CURRENT silicon, while m2 would be ancient. A bare /^t/
   // test also swallowed trn1/trn2 into the burstable branch, so Trainium -
@@ -295,6 +305,56 @@ function breakdown(
     .sort((a, b) => b.costUsd - a.costUsd);
 }
 
+/**
+ * The label a service should carry INSIDE a category panel.
+ *
+ * serviceName is the AWS invoice header, but the category is derived from the
+ * sub-service beneath it, and the two are different taxonomies. On one
+ * reference bill "Elastic Compute Cloud" spans three categories at once:
+ *
+ *   Compute     running Linux/UNIX, Ubuntu Pro, T4GCPUCredits
+ *   Storage     EBS
+ *   Networking  NatGateway            <- $639.29
+ *
+ * Grouping by the header and labelling by the header meant the composition
+ * panel displayed "Elastic Compute Cloud" under Networking & Content Delivery
+ * with nothing to explain it. The classification is right - NAT Gateway maps to
+ * Cloud NAT on the target cloud, not to a VM - but the one field that makes it
+ * right was the one field never shown.
+ *
+ * A qualifier is added only when the header genuinely spans categories AND the
+ * group has a single consistent sub-service. Under Compute the sub-services
+ * differ, so the plain header is kept rather than fragmenting the panel.
+ */
+function serviceLabels(items: InsightLineItem[]): Map<string, string> {
+  const catsOf = new Map<string, Set<string>>();
+  for (const i of items) {
+    if (!catsOf.has(i.serviceName)) catsOf.set(i.serviceName, new Set());
+    catsOf.get(i.serviceName)!.add(i.serviceCategory || "Other");
+  }
+  const subsOf = new Map<string, Set<string>>();
+  for (const i of items) {
+    if ((catsOf.get(i.serviceName)?.size ?? 1) < 2) continue;
+    const key = (i.serviceCategory || "Other") + " || " + i.serviceName;
+    // The sub-service is the description prefix, minus the vendor word and the
+    // header itself: "Amazon Elastic Compute Cloud NatGateway" -> "NatGateway".
+    const sub = i.description.split(" \u2014 ")[0].trim()
+      .replace(/^(?:Amazon|AWS)\s+/i, "")
+      .replace(new RegExp("^" + i.serviceName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*", "i"), "")
+      .trim();
+    if (!sub) continue;
+    if (!subsOf.has(key)) subsOf.set(key, new Set());
+    subsOf.get(key)!.add(sub);
+  }
+  const labels = new Map<string, string>();
+  for (const [key, subs] of subsOf) {
+    if (subs.size !== 1) continue;
+    const serviceName = key.split(" || ")[1];
+    labels.set(key, serviceName + " \u00b7 " + Array.from(subs)[0]);
+  }
+  return labels;
+}
+
 export function computeInsights(items: InsightLineItem[]): BillInsights {
   const totalUsd = round2(items.reduce((s, i) => s + i.costUsd, 0));
   const notes: DataNote[] = [];
@@ -451,6 +511,7 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
     .slice(0, 10)
     .map(i => ({ ...i, share: totalUsd === 0 ? 0 : i.costUsd / totalUsd }));
 
+  const labels = serviceLabels(items);
   const instanceItems = items.filter(i => instanceType(i) !== null);
   const instanceTotal = instanceItems.reduce((s, i) => s + i.costUsd, 0);
 
@@ -569,7 +630,9 @@ export function computeInsights(items: InsightLineItem[]): BillInsights {
       Array.from(new Set(items.map(i => i.serviceCategory || "Other"))).map(cat => {
         const inCat = items.filter(i => (i.serviceCategory || "Other") === cat);
         const catTotal = inCat.reduce((s2, i) => s2 + i.costUsd, 0);
-        return [cat, breakdown(inCat, i => i.serviceName, catTotal)];
+        return [cat, breakdown(inCat, i =>
+          labels.get((i.serviceCategory || "Other") + " || " + i.serviceName) ?? i.serviceName,
+          catTotal)];
       }),
     ),
     byPricingModel: breakdown(items, i => model.get(i) as string, totalUsd),

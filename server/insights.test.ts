@@ -509,3 +509,79 @@ describe("net and gross instance spend must not silently disagree", () => {
     expect(n.message).toContain("$" + gross.toFixed(2));
   });
 });
+
+describe("a service header that spans categories must say which part it is", () => {
+  // "Elastic Compute Cloud" is the AWS invoice HEADER, not the product. NAT
+  // Gateway and EBS are billed under it and are networking and storage
+  // charges. The composition panel grouped by the header and labelled by the
+  // header, so it displayed "Elastic Compute Cloud" under Networking with
+  // nothing to explain it. The classification is correct - NAT Gateway maps to
+  // Cloud NAT on the target cloud, not to a VM - but the field that makes it
+  // correct was the field never shown.
+  const R = "Asia Pacific (Mumbai)";
+  const L = (cat: string, svc: string, desc: string, cost: number): InsightLineItem =>
+    ({ region: R, serviceCategory: cat, serviceName: svc, description: desc,
+       quantity: null, uom: null, costUsd: cost });
+  const bill = () => [
+    L("Networking & Content Delivery", "Elastic Compute Cloud",
+      "Amazon Elastic Compute Cloud NatGateway — $0.056 per NAT gateway Hour", 639.29),
+    L("Storage", "Elastic Compute Cloud",
+      "EBS — $0.05 per GB-Month of snapshot data stored", 120),
+    L("Compute", "Elastic Compute Cloud",
+      "Amazon Elastic Compute Cloud running Linux/UNIX — $0.10 per On Demand Linux m7i.large Instance Hour", 400),
+    L("Compute", "Elastic Compute Cloud",
+      "Amazon Elastic Compute Cloud running Ubuntu Pro Linux — $0.12 per hour", 50),
+    L("Database", "Relational Database Service",
+      "Amazon Relational Database Service for MySQL — $0.25 per db.m6g.large instance hour", 200),
+  ];
+
+  it("names the sub-service when the header sits in a surprising category", () => {
+    const s = computeInsights(bill()).servicesByCategory;
+    expect(s["Networking & Content Delivery"][0].key).toBe("Elastic Compute Cloud · NatGateway");
+    expect(s["Storage"][0].key).toBe("Elastic Compute Cloud · EBS");
+  });
+
+  it("does not fragment a category whose sub-services differ", () => {
+    // Under Compute the header is not confusing, and qualifying would split one
+    // row into "running Linux/UNIX" and "running Ubuntu Pro Linux".
+    const s = computeInsights(bill()).servicesByCategory;
+    expect(s["Compute"]).toHaveLength(1);
+    expect(s["Compute"][0].key).toBe("Elastic Compute Cloud");
+    expect(s["Compute"][0].costUsd).toBe(450);
+  });
+
+  it("leaves a service that sits in exactly one category untouched", () => {
+    const s = computeInsights(bill()).servicesByCategory;
+    expect(s["Database"][0].key).toBe("Relational Database Service");
+  });
+
+  it("still reconciles every category to its own total", () => {
+    const ins = computeInsights(bill());
+    for (const row of ins.byCategory) {
+      const svcs = ins.servicesByCategory[row.key];
+      expect(svcs.reduce((a, r) => a + r.costUsd, 0)).toBeCloseTo(row.costUsd, 2);
+    }
+  });
+});
+
+describe("Redshift node families do not follow EC2's ladder", () => {
+  // ra3 is Redshift's CURRENT node type. generation() parsed the first integer
+  // out of the family and mapped it onto EC2's convention, so ra3 -> 3 ->
+  // Legacy. On one reference bill that was the single largest machine line:
+  // $449.38, 26.4% of machine spend, top row of the panel. "LEGACY" beside a
+  // customer's production Redshift cluster is a factual error they will catch.
+  it("reads the Redshift ladder by its letters, not its digit", () => {
+    expect(generation("ra3.large")).toBe("Current");
+    expect(generation("ra3.4xlarge")).toBe("Current");
+    expect(generation("dc2.large")).toBe("Previous");
+    expect(generation("ds2.xlarge")).toBe("Legacy");
+  });
+
+  it("leaves every other ladder alone", () => {
+    expect(generation("m5.large")).toBe("Previous");
+    expect(generation("r6g.xlarge")).toBe("Current");
+    expect(generation("g6.xlarge")).toBe("Current");
+    expect(generation("trn2.48xlarge")).toBe("Current");
+    expect(generation("t3.medium")).toBe("Previous");
+  });
+});
