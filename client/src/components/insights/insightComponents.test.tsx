@@ -33,6 +33,11 @@ import { categoryToken } from "./tokens";
  * exists on no other machine, so the loader returned early, zero cases were
  * generated, and the suite passed while testing nothing.
  */
+const msg = (n: number) =>
+  `Found ${n} reference bills in ${BILLS_DIR}, expected at least 12. These tests render every `
+  + `component against REAL bill data; without the PDFs this file checks almost nothing. Copy `
+  + `the bill PDFs into ./reference-bills, or point BILLS_DIR at the folder that holds them.`;
+
 const BILLS_DIR = process.env.BILLS_DIR
   ?? path.resolve(process.cwd(), "reference-bills");
 
@@ -62,7 +67,7 @@ const text = (html: string) => decode(html.replace(/<[^>]*>/g, " ")).replace(/\s
 
 describe("insight components render every reference bill", () => {
   it("loaded the reference bills", () => {
-    expect(cases.length).toBeGreaterThanOrEqual(12);
+    expect(cases.length, msg(cases.length)).toBeGreaterThanOrEqual(12);
   });
 
   it("CategoryKey shows every category present, with no poison values", () => {
@@ -224,17 +229,5 @@ describe("DataNotes must not print the same caveat twice on one page", () => {
   it("falls back to every note when neither filter is given", () => {
     const html = renderToStaticMarkup(<DataNotes notes={notes as never} />);
     for (const n of notes) expect(html).toContain(n.message);
-  });
-});
-
-describe("reference bills", () => {
-  it("were actually found, so these tests are testing something", () => {
-    if (process.env.ALLOW_NO_BILLS === "1") return;
-    expect(cases.length,
-      `No reference bill PDFs found in ${BILLS_DIR}. Every test in this file renders a `
-      + `component against REAL bill data, so without them the file generates zero tests `
-      + `and passes while checking nothing. Point BILLS_DIR at the folder containing the `
-      + `bill PDFs, or set ALLOW_NO_BILLS=1 to acknowledge running without them.`
-    ).toBeGreaterThan(0);
   });
 });

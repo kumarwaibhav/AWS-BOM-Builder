@@ -347,7 +347,7 @@ function serviceLabels(items: InsightLineItem[]): Map<string, string> {
     subsOf.get(key)!.add(sub);
   }
   const labels = new Map<string, string>();
-  for (const [key, subs] of subsOf) {
+  for (const [key, subs] of Array.from(subsOf)) {
     if (subs.size !== 1) continue;
     const serviceName = key.split(" || ")[1];
     labels.set(key, serviceName + " \u00b7 " + Array.from(subs)[0]);

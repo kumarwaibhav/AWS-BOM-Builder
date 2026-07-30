@@ -56,7 +56,11 @@ const find = (needle: string) => {
 };
 
 describe("the tab renders every reference bill", () => {
-  it("loaded them", () => expect(bills.size).toBeGreaterThanOrEqual(12));
+  it("loaded them", () => expect(bills.size,
+    `Found ${bills.size} reference bills in ${BILLS_DIR}, expected at least 12. These tests `
+    + `render the insights tab against REAL bill data; without the PDFs this file checks `
+    + `nothing. Copy the bill PDFs into ./reference-bills, or point BILLS_DIR at them.`
+  ).toBeGreaterThanOrEqual(12));
 
   it("never puts a poison value on screen", () => {
     for (const [file, h] of Array.from(html)) expect(text(h), file).not.toMatch(POISON);
@@ -167,17 +171,5 @@ describe("degradation paths, driven by the real bills that hit them", () => {
       expect(t, file).toMatch(/of charges less \$/);
       expect(t, file).toMatch(/net\./);
     }
-  });
-});
-
-describe("reference bills", () => {
-  it("were actually found, so these tests are testing something", () => {
-    if (process.env.ALLOW_NO_BILLS === "1") return;
-    expect(cases.length,
-      `No reference bill PDFs found in ${BILLS_DIR}. Every test in this file renders a `
-      + `component against REAL bill data, so without them the file generates zero tests `
-      + `and passes while checking nothing. Point BILLS_DIR at the folder containing the `
-      + `bill PDFs, or set ALLOW_NO_BILLS=1 to acknowledge running without them.`
-    ).toBeGreaterThan(0);
   });
 });

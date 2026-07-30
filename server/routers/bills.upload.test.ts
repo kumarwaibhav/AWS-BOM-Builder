@@ -54,13 +54,52 @@ async function failureMessages() {
   return { thrown, stored };
 }
 
-beforeEach(() => {
-  pdfParse.mockReset(); updateBill.mockReset(); createBill.mockReset();
+/**
+ * A bill text that genuinely parses to one line item, verified against the real
+ * parser. Earlier versions of these tests used a bare table header, which
+ * parses to ZERO items - so the pipeline threw the "no line items" message
+ * before ever reaching enrichment, and the tests that claimed to exercise a
+ * mid-pipeline failure never did.
+ */
+const PARSEABLE_BILL = [
+  "AWS estimated bill summary",
+  "Estimated grand total: USD 100.00",
+  "Billing period", "Jun 1 - Jun 30, 2026", "Account ID", "123456789012",
+  "Charges by service",
+  "Amazon Web Services, Inc. (4)Total pre-taxUSD 100.00",
+  "DescriptionUsage QuantityAmount in USD",
+  "Elastic Compute CloudUSD 100.00",
+  "US East (N. Virginia)USD 100.00",
+  "Amazon Elastic Compute Cloud running Linux/UNIXUSD 100.00",
+  "$0.10 per On Demand Linux m7i.large Instance Hour1,000 HrsUSD 100.00",
+].join("\n");
+
+/** A real summary-only export: no charges table, and zero parseable rows. */
+const SUMMARY_ONLY_BILL = [
+  "AWS estimated bill summary",
+  "Service provider", "Amazon Web Services, Inc.",
+  "Estimated grand total: USD 871.66",
+  "Account ID", "123456789012",
+].join("\n");
+
+beforeEach(async () => {
+  // Every mock, not just three. A queued ...Once left armed by a test whose
+  // code path was never reached fires inside a LATER test and fails it there,
+  // which is what happened to the summary-only case.
+  vi.resetAllMocks();
   createBill.mockResolvedValue(4242);
+  const { enrichItems } = await import("../enrichment");
+  const { generateBomExcel } = await import("../excel");
+  (enrichItems as unknown as ReturnType<typeof vi.fn>)
+    .mockResolvedValue({ items: [], llmSucceededIndices: new Set<number>() });
+  (generateBomExcel as unknown as ReturnType<typeof vi.fn>)
+    .mockResolvedValue(Buffer.from("xlsx"));
 });
 
 describe("a PDF the reader rejects", () => {
-  beforeEach(() => pdfParse.mockRejectedValue(new Error("bad XRef entry")));
+  beforeEach(() => {
+    pdfParse.mockImplementation(() => Promise.reject(new Error("bad XRef entry")));
+  });
 
   it("is retried once before the upload is failed", async () => {
     await upload().catch(() => {});
@@ -85,9 +124,9 @@ describe("a PDF the reader rejects", () => {
 
   it("succeeds if the retry succeeds, because extraction is not deterministic", async () => {
     pdfParse.mockReset();
-    pdfParse
-      .mockRejectedValueOnce(new Error("bad XRef entry"))
-      .mockResolvedValueOnce({ text: "" });
+    let call = 0;
+    pdfParse.mockImplementation(() =>
+      ++call === 1 ? Promise.reject(new Error("bad XRef entry")) : Promise.resolve({ text: "" }));
     // Reaches the parser rather than failing on extraction: the parse of empty
     // text then fails with the deliberate summary-only message.
     const msg = await upload().catch((e: Error) => e.message);
@@ -99,11 +138,10 @@ describe("a PDF the reader rejects", () => {
 
 describe("a failure inside the pipeline", () => {
   it("does not leak a driver or schema error to the customer", async () => {
-    pdfParse.mockResolvedValue({ text: "DescriptionUsage QuantityAmount in USD" });
+    pdfParse.mockResolvedValue({ text: PARSEABLE_BILL });
     const { enrichItems } = await import("../enrichment");
-    (enrichItems as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('relation "bills" does not exist: select "id", "sessionId", "pdfKey"')
-    );
+    (enrichItems as unknown as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Promise.reject(new Error('relation "bills" does not exist: select "id", "sessionId", "pdfKey"')));
     const { thrown, stored } = await failureMessages();
     for (const m of [thrown, stored]) {
       expect(m).not.toContain("sessionId");
@@ -114,9 +152,10 @@ describe("a failure inside the pipeline", () => {
   });
 
   it("keeps a reference the customer can quote to support", async () => {
-    pdfParse.mockResolvedValue({ text: "DescriptionUsage QuantityAmount in USD" });
+    pdfParse.mockResolvedValue({ text: PARSEABLE_BILL });
     const { enrichItems } = await import("../enrichment");
-    (enrichItems as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("boom"));
+    (enrichItems as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation(() => Promise.reject(new Error("boom")));
     const { thrown } = await failureMessages();
     expect(thrown).toContain("4242");
   });
@@ -128,9 +167,8 @@ describe("a failure BEFORE the bill record exists", () => {
   // so the upload appeared to evaporate with nothing in the archive.
   it("reports a problem on our side rather than a driver message", async () => {
     const { storagePut } = await import("../storage");
-    (storagePut as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('getaddrinfo ENOTFOUND xyz.supabase.co')
-    );
+    (storagePut as unknown as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Promise.reject(new Error("getaddrinfo ENOTFOUND xyz.supabase.co")));
     const thrown = await upload().catch((e: Error) => e.message);
     expect(thrown).not.toContain("supabase");
     expect(thrown).not.toContain("ENOTFOUND");
@@ -140,7 +178,8 @@ describe("a failure BEFORE the bill record exists", () => {
 
   it("does not attempt to parse a bill it could not store", async () => {
     const { storagePut } = await import("../storage");
-    (storagePut as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("down"));
+    (storagePut as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation(() => Promise.reject(new Error("down")));
     await upload().catch(() => {});
     expect(pdfParse).not.toHaveBeenCalled();
   });
@@ -148,7 +187,7 @@ describe("a failure BEFORE the bill record exists", () => {
 
 describe("deliberate, already-human messages survive untouched", () => {
   it("keeps the summary-only guidance for a bill with no itemised charges", async () => {
-    pdfParse.mockResolvedValue({ text: "AWS estimated bill summary\nEstimated grand total: USD 871.66" });
+    pdfParse.mockResolvedValue({ text: SUMMARY_ONLY_BILL });
     const { thrown } = await failureMessages();
     expect(thrown).toMatch(/only a grand total/);
     expect(thrown).toMatch(/Charges by service/);
@@ -186,7 +225,7 @@ describe("a bill that is not denominated in USD", () => {
 
   it("still gives the summary-only guidance for a USD bill with no charges table", async () => {
     // The currency branch must not swallow the two existing diagnoses.
-    pdfParse.mockResolvedValue({ text: "AWS estimated bill summary\nTotal in USD\nUSD 871.66" });
+    pdfParse.mockResolvedValue({ text: SUMMARY_ONLY_BILL });
     const { thrown } = await failureMessages();
     expect(thrown).toMatch(/only a grand total/);
     expect(thrown).not.toContain("denominated");
