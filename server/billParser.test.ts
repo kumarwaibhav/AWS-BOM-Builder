@@ -3,18 +3,52 @@
  * Validates line-item extraction, per-service totals, and metadata.
  */
 import { describe, expect, it, beforeAll } from "vitest";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
+import path from "node:path";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { parseAwsBill, tokenizeLine, isPlausibleUom, type ParsedBill } from "./billParser";
 
-const SAMPLE_PDF = "/home/ubuntu/upload/Bills_BillingandCostManagement_Global.pdf";
-const hasSample = existsSync(SAMPLE_PDF);
+/**
+ * The reference bill this suite parses. It is kept outside the repository
+ * because it is real customer billing data and this repository is public.
+ *
+ * The path here used to be "/home/ubuntu/upload/Bills_BillingandCostManagement
+ * _Global.pdf" - an absolute path from the sandbox V1 was built in. It exists
+ * on no other machine, so `hasSample` was false everywhere and all seven tests
+ * below skipped silently for the entire life of the project, on every
+ * developer machine and in CI. A suite that reports success while executing
+ * nothing is worse than no suite, because it occupies the space where real
+ * coverage would otherwise be missed.
+ *
+ * It now resolves the same way the component suites do, and the filename is
+ * matched by shape rather than exactly, because the browser download names it
+ * with spaces ("Bills _ Billing and Cost Management _ Global.pdf").
+ */
+const BILLS_DIR = process.env.BILLS_DIR ?? path.resolve(process.cwd(), "reference-bills");
+const SAMPLE_PDF: string | null = existsSync(BILLS_DIR)
+  ? (readdirSync(BILLS_DIR)
+      .filter(f => /^Bills.*Billing.*Cost.*Management.*\.pdf$/i.test(f))
+      .sort()
+      .map(f => path.join(BILLS_DIR, f))[0] ?? null)
+  : null;
 
-describe.skipIf(!hasSample)("parseAwsBill on sample bill", () => {
+describe("the reference bill", () => {
+  it("was found, so the suite below is not silently skipping", () => {
+    if (process.env.ALLOW_NO_BILLS === "1") return;
+    expect(SAMPLE_PDF,
+      `No file matching "Bills ... Billing ... Cost Management ... .pdf" in ${BILLS_DIR}. `
+      + `The seven tests below parse a real AWS bill end to end and cannot run without it. `
+      + `Copy the bill PDFs into ./reference-bills, point BILLS_DIR at the folder that holds `
+      + `them, or set ALLOW_NO_BILLS=1 to acknowledge running without them.`
+    ).not.toBeNull();
+  });
+});
+
+describe.skipIf(!SAMPLE_PDF)("parseAwsBill on the reference bill", () => {
   let parsed: ParsedBill;
 
   beforeAll(async () => {
-    const data = await pdfParse(readFileSync(SAMPLE_PDF));
+    const data = await pdfParse(readFileSync(SAMPLE_PDF as string));
     parsed = parseAwsBill(data.text);
   });
 
@@ -64,6 +98,25 @@ describe.skipIf(!hasSample)("parseAwsBill on sample bill", () => {
   it("assigns regions including Mumbai and Global", () => {
     const regions = new Set(parsed.items.map(i => i.region));
     expect([...regions].some(r => r.includes("Mumbai"))).toBe(true);
+  });
+
+  it("files every EBS charge under Storage, never under Compute", () => {
+    // D2, the largest defect Phase 1 fixed: EBS is invoiced beneath the
+    // "Elastic Compute Cloud" header, so every volume and snapshot charge was
+    // categorised as Compute - $14,094.59 across the 13 reference bills. This
+    // bill carries 19 EBS lines and is the regression guard on real input.
+    const ebs = parsed.items.filter(i => /\bEBS\b/i.test(i.description));
+    expect(ebs.length).toBeGreaterThan(0);
+    for (const i of ebs) {
+      expect(i.serviceCategory, i.description.slice(0, 80)).toBe("Storage");
+    }
+  });
+
+  it("leaves no line item without a service category", () => {
+    // D3: 31 lines worth $467.82 fell through to a blank category, which then
+    // reached the customer as an empty column in the Excel BOM.
+    const blank = parsed.items.filter(i => !i.serviceCategory.trim());
+    expect(blank.map(i => i.description.slice(0, 60))).toEqual([]);
   });
 });
 
